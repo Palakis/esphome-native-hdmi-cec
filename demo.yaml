@@ -34,3 +34,4 @@ wifi:
 captive_portal:
 
 hdmi_cec:
+  pin: GPIO26
