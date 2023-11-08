@@ -35,3 +35,4 @@ captive_portal:
 
 hdmi_cec:
   pin: GPIO26
+  address: 0x5
