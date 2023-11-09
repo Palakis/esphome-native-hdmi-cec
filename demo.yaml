@@ -36,3 +36,16 @@ captive_portal:
 hdmi_cec:
   pin: GPIO26
   address: 0x5
+  on_message:
+    - opcode: 0xC3
+      then:
+        logger.log: "ARC Start Requested"
+    - data: [0x44, 0x41]
+      then:
+        logger.log: "Volume Up"
+    - data: [0x44, 0x42]
+      then:
+        logger.log: "Volume Down"
+    - data: [0x44, 0x43]
+      then:
+        logger.log: "Mute"
