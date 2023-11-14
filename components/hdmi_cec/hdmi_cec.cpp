@@ -71,6 +71,10 @@ void HDMICEC::loop() {
   }
 }
 
+void HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data) {
+  // TODO
+}
+
 void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
   const uint32_t now = micros();
   const bool level = self->isr_pin_.digital_read();
