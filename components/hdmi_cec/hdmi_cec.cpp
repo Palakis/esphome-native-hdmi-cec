@@ -72,10 +72,69 @@ void HDMICEC::loop() {
 }
 
 void HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data) {
-  // TODO
+  // TODO wait for the bus to be free
+
+  // disable the GPIO interrupt
+  gpio_interrupt_disabled_ = true;
+
+  send_start_bit();
+  
+  // for each byte of the frame:
+  for (auto it = data.begin(); it != data.end(); ++it) {
+    uint8_t current_byte = *it;
+
+    // 1. send the current byte
+    for (int8_t i = 7; i >= 0; i--) {
+      bool bit_value = ((current_byte >> i) & 0b1);
+      send_bit(bit_value);
+    }
+
+    // 2. send EOM bit (logic 1 if this is the last byte of the frame)
+    bool is_eom = (it == data.end());
+    send_bit(is_eom);
+
+    // 3. send ack bit
+    send_bit(true); // TODO read ack
+  }
+
+  // re-enable the GPIO interrupt
+  gpio_interrupt_disabled_ = false;
+}
+
+void HDMICEC::send_start_bit() {
+  // 1. pull low for 3700 us
+  this->pin_->digital_write(false);
+  delayMicroseconds(3700);
+
+  // 2. pull high for 800 us
+  this->pin_->digital_write(true);
+  delayMicroseconds(800);
+
+  // total duration: 4500 us
+}
+
+void HDMICEC::send_bit(bool bit_value) {
+  // total bit duration:
+  // logic 1: pull low for 600 us, then pull high for 1800 us
+  // logic 0: pull low for 1500 us, then pull high for 900 us
+  static const uint32_t TOTAL_BIT_US = 2400;
+  static const uint32_t HIGH_BIT_US = 600;
+  static const uint32_t LOW_BIT_US = 1500;
+
+  const uint32_t low_duration_us = (bit_value ? HIGH_BIT_US : LOW_BIT_US);
+  const uint32_t high_duration_us = (TOTAL_BIT_US - low_duration_us);
+
+  this->pin_->digital_write(false);
+  delayMicroseconds(low_duration_us);
+  this->pin_->digital_write(true);
+  delayMicroseconds(high_duration_us);
 }
 
 void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
+  if (self->gpio_interrupt_disabled_) {
+    return;
+  }
+
   const uint32_t now = micros();
   const bool level = self->isr_pin_.digital_read();
 
