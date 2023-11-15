@@ -68,7 +68,12 @@ void HDMICEC::loop() {
   }
 }
 
-void HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data) {
+void HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes) {
+  uint8_t header = (((source & 0x0F) << 4) | (destination & 0x0F));
+  std::vector<uint8_t> frame;
+  frame.push_back(header);
+  frame.insert(frame.end(), data_bytes.begin(), data_bytes.end());
+  
   // TODO wait for the bus to be free
 
   // disable the GPIO interrupt
@@ -77,7 +82,7 @@ void HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   send_start_bit();
   
   // for each byte of the frame:
-  for (auto it = data.begin(); it != data.end(); ++it) {
+  for (auto it = frame.begin(); it != frame.end(); ++it) {
     uint8_t current_byte = *it;
 
     // 1. send the current byte
@@ -87,7 +92,7 @@ void HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
     }
 
     // 2. send EOM bit (logic 1 if this is the last byte of the frame)
-    bool is_eom = (it == data.end());
+    bool is_eom = (it == frame.end());
     send_bit(is_eom);
 
     // 3. send ack bit
