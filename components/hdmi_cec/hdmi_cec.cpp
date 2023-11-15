@@ -34,7 +34,8 @@ void HDMICEC::loop() {
     this->recv_queue_.pop();
 
     if (frame.size() == 1) {
-      // ignore pings
+      // TODO respond to pings to our address
+      // for now, ignore pings
       continue;
     }
 
