@@ -28,7 +28,7 @@ public:
   void set_promiscuous_mode(bool promiscuous_mode) { promiscuous_mode_ = promiscuous_mode; }
   void add_message_trigger(MessageTrigger *trigger) { message_triggers_.push_back(trigger); }
 
-  void send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data);
+  bool send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes);
 
   // Component overrides
   float get_setup_priority() { return esphome::setup_priority::HARDWARE; }
@@ -36,12 +36,13 @@ public:
   void dump_config() override;
   void loop() override;
 
-  static void gpio_intr(HDMICEC *self);
-
 protected:
-  static void reset_state_variables(HDMICEC *self);
-  void send_start_bit();
-  void send_bit(bool bit_value);
+  static void gpio_intr(HDMICEC *self);
+  static void reset_state_variables_(HDMICEC *self);
+  bool send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast);
+  void send_start_bit_();
+  void send_bit_(bool bit_value);
+  bool acknowledge_byte_(bool is_broadcast);
 
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;

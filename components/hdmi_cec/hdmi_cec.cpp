@@ -6,9 +6,14 @@ namespace esphome {
 namespace hdmi_cec {
 
 static const char *const TAG = "hdmi_cec";
+// receiver constants
 static const uint32_t START_BIT_MIN_US = 3500;
 static const uint32_t HIGH_BIT_MIN_US = 400;
 static const uint32_t HIGH_BIT_MAX_US = 800;
+// transmitter constants
+static const uint32_t TOTAL_BIT_US = 2400;
+static const uint32_t HIGH_BIT_US = 600;
+static const uint32_t LOW_BIT_US = 1500;
 
 void HDMICEC::setup() {
   this->isr_pin_ = this->pin_->to_isr();
@@ -68,18 +73,26 @@ void HDMICEC::loop() {
   }
 }
 
-void HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes) {
+bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes) {
+  // prepare the bytes to send
   uint8_t header = (((source & 0x0F) << 4) | (destination & 0x0F));
-  std::vector<uint8_t> frame;
-  frame.push_back(header);
+  std::vector<uint8_t> frame = { header };
   frame.insert(frame.end(), data_bytes.begin(), data_bytes.end());
-  
+
   // TODO wait for the bus to be free
 
+  // TODO attemps retry mechanism
+  bool is_broadcast (destination == 0xF);
+  send_frame_(frame, is_broadcast);
+
+  return true;
+}
+
+bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) {
   // disable the GPIO interrupt
   gpio_interrupt_disabled_ = true;
 
-  send_start_bit();
+  send_start_bit_();
   
   // for each byte of the frame:
   for (auto it = frame.begin(); it != frame.end(); ++it) {
@@ -88,22 +101,28 @@ void HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
     // 1. send the current byte
     for (int8_t i = 7; i >= 0; i--) {
       bool bit_value = ((current_byte >> i) & 0b1);
-      send_bit(bit_value);
+      send_bit_(bit_value);
     }
 
     // 2. send EOM bit (logic 1 if this is the last byte of the frame)
     bool is_eom = (it == frame.end());
-    send_bit(is_eom);
+    send_bit_(is_eom);
 
     // 3. send ack bit
-    send_bit(true); // TODO read ack
+    bool success = acknowledge_byte_(is_broadcast);
+    if (success) {
+      gpio_interrupt_disabled_ = false; // re-enable interrupts before exiting early
+      return false;
+    }
   }
 
   // re-enable the GPIO interrupt
   gpio_interrupt_disabled_ = false;
+
+  return true;
 }
 
-void HDMICEC::send_start_bit() {
+void HDMICEC::send_start_bit_() {
   // 1. pull low for 3700 us
   this->pin_->digital_write(false);
   delayMicroseconds(3700);
@@ -112,16 +131,13 @@ void HDMICEC::send_start_bit() {
   this->pin_->digital_write(true);
   delayMicroseconds(800);
 
-  // total duration: 4500 us
+  // total duration of start bit: 4500 us
 }
 
-void HDMICEC::send_bit(bool bit_value) {
+void HDMICEC::send_bit_(bool bit_value) {
   // total bit duration:
   // logic 1: pull low for 600 us, then pull high for 1800 us
   // logic 0: pull low for 1500 us, then pull high for 900 us
-  static const uint32_t TOTAL_BIT_US = 2400;
-  static const uint32_t HIGH_BIT_US = 600;
-  static const uint32_t LOW_BIT_US = 1500;
 
   const uint32_t low_duration_us = (bit_value ? HIGH_BIT_US : LOW_BIT_US);
   const uint32_t high_duration_us = (TOTAL_BIT_US - low_duration_us);
@@ -130,6 +146,26 @@ void HDMICEC::send_bit(bool bit_value) {
   delayMicroseconds(low_duration_us);
   this->pin_->digital_write(true);
   delayMicroseconds(high_duration_us);
+}
+
+bool HDMICEC::acknowledge_byte_(bool is_broadcast) {
+  uint32_t start_time = micros();
+
+  this->pin_->digital_write(false);
+  delayMicroseconds(HIGH_BIT_US);
+
+  this->pin_->digital_write(true);
+  static const uint32_t ACK_WAIT_US = 400;
+  delayMicroseconds(ACK_WAIT_US); // 400 us is twice the upper tolerance margin for the end of the low state
+  bool value = this->pin_->digital_read();
+
+  // sleep for the rest of the bit duration (TOTAL_BIT_US - HIGH_BIT_US - 400)
+  delayMicroseconds(TOTAL_BIT_US - HIGH_BIT_US - ACK_WAIT_US);
+
+  if (!is_broadcast) {
+    return !value;
+  }
+  return value;
 }
 
 void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
@@ -157,7 +193,7 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
   if (pulse_duration > START_BIT_MIN_US) {
     // start bit detected. reset everything and start receiving
     self->decoder_state_ = DecoderState::ReceivingByte;
-    reset_state_variables(self);
+    reset_state_variables_(self);
     return;
   }
 
@@ -188,7 +224,7 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
       if (isEOM) {
         // pass frame to app
         self->recv_queue_.push(self->recv_frame_buffer_);
-        reset_state_variables(self);
+        reset_state_variables_(self);
       }
 
       self->decoder_state_ = (
@@ -200,24 +236,26 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
     }
 
     case DecoderState::WaitingForAck: {
+      // TODO ack bit
       self->decoder_state_ = DecoderState::ReceivingByte;
       break;
     }
 
     case DecoderState::WaitingForEOMAck: {
+      // TODO ack bit
       self->decoder_state_ = DecoderState::Idle;
       break;
     }
 
     default: {
       self->decoder_state_ = DecoderState::ReceivingByte;
-      reset_state_variables(self);
+      reset_state_variables_(self);
       break;
     }
   }
 }
 
-void IRAM_ATTR HDMICEC::reset_state_variables(HDMICEC *self) {
+void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_bit_counter_ = 0;
   self->recv_byte_buffer_ = 0x0;
   self->recv_frame_buffer_.clear();
