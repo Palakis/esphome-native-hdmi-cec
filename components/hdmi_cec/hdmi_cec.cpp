@@ -33,9 +33,20 @@ void HDMICEC::dump_config() {
 }
 
 void HDMICEC::loop() {
-  while(!this->recv_queue_.empty()) {
-    auto frame = this->recv_queue_.front();
-    this->recv_queue_.pop();
+  // send queued ack bit
+  if (recv_ack_bit_started_) {
+    recv_ack_bit_started_ = false;
+    
+    // wait for the end of logical 0
+    uint32_t low_wait_time = (LOW_BIT_US - (millis() - last_falling_edge_us_));
+    delay_microseconds_safe(low_wait_time);
+    
+    pin_->digital_write(true);
+  }
+
+  while(!recv_queue_.empty()) {
+    auto frame = recv_queue_.front();
+    recv_queue_.pop();
 
     if (frame.size() == 1) {
       // TODO respond to pings to our address
@@ -250,14 +261,21 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
       break;
     }
 
+
     case DecoderState::WaitingForAck: {
-      // TODO ack bit
+      // keep the line low, then tell the main loop we started sending an ack
+      self->isr_pin_.digital_write(false);
+      self->recv_ack_bit_started_ = true;
+
       self->decoder_state_ = DecoderState::ReceivingByte;
       break;
     }
 
     case DecoderState::WaitingForEOMAck: {
-      // TODO ack bit
+      // keep the line low, then tell the main loop we started sending an ack
+      self->isr_pin_.digital_write(false);
+      self->recv_ack_bit_started_ = true;
+
       self->decoder_state_ = DecoderState::Idle;
       break;
     }

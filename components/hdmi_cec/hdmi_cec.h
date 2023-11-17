@@ -57,6 +57,7 @@ protected:
   uint8_t recv_byte_buffer_;
   std::vector<uint8_t> recv_frame_buffer_;
   std::queue<std::vector<uint8_t>> recv_queue_;
+  bool recv_ack_bit_started_;
 };
 
 class MessageTrigger : public Trigger<uint8_t, uint8_t, std::vector<uint8_t>> {
