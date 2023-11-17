@@ -81,7 +81,6 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
   // TODO wait for the bus to be free
 
-  // TODO attemps retry mechanism
   bool is_broadcast (destination == 0xF);
   send_frame_(frame, is_broadcast);
 
@@ -151,12 +150,14 @@ void HDMICEC::send_bit_(bool bit_value) {
 bool HDMICEC::acknowledge_byte_(bool is_broadcast) {
   uint32_t start_time = micros();
 
+  // send a Logical 1
   this->pin_->digital_write(false);
   delayMicroseconds(HIGH_BIT_US);
-
   this->pin_->digital_write(true);
-  static const uint32_t ACK_WAIT_US = 400;
-  delayMicroseconds(ACK_WAIT_US); // 400 us is twice the upper tolerance margin for the end of the low state
+
+  // 450 us should land us right in the middle of the "Safe sample period" (CEC spec -> Signaling and Bit Timing -> Figure 5)
+  static const uint32_t ACK_WAIT_US = 450;
+  delayMicroseconds(ACK_WAIT_US);
   bool value = this->pin_->digital_read();
 
   // sleep for the rest of the bit duration (TOTAL_BIT_US - HIGH_BIT_US - 400)
