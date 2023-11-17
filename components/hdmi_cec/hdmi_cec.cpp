@@ -148,7 +148,7 @@ void HDMICEC::send_bit_(bool bit_value) {
 }
 
 bool HDMICEC::acknowledge_byte_(bool is_broadcast) {
-  uint32_t start_time = micros();
+  // TODO FIX: the inverted case logic is potentially flawed
 
   // send a Logical 1
   this->pin_->digital_write(false);
