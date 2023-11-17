@@ -163,10 +163,10 @@ bool HDMICEC::acknowledge_byte_(bool is_broadcast) {
   // sleep for the rest of the bit duration (TOTAL_BIT_US - HIGH_BIT_US - 400)
   delayMicroseconds(TOTAL_BIT_US - HIGH_BIT_US - ACK_WAIT_US);
 
-  if (!is_broadcast) {
-    return !value;
+  if (is_broadcast) {
+    return value;
   }
-  return value;
+  return (!value);
 }
 
 void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
