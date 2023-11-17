@@ -14,6 +14,9 @@ static const uint32_t HIGH_BIT_MAX_US = 800;
 static const uint32_t TOTAL_BIT_US = 2400;
 static const uint32_t HIGH_BIT_US = 600;
 static const uint32_t LOW_BIT_US = 1500;
+// arbitration and retransmission
+static const uint32_t MIN_SIGNAL_FREE_TIME = (TOTAL_BIT_US * 7);
+static const size_t MAX_ATTEMPTS = 5;
 
 void HDMICEC::setup() {
   this->isr_pin_ = this->pin_->to_isr();
@@ -81,9 +84,14 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   std::vector<uint8_t> frame = { header };
   frame.insert(frame.end(), data_bytes.begin(), data_bytes.end());
 
-  // TODO wait for the bus to be free
+  // wait for the bus to be free
+  uint32_t signal_free_us = (millis() - last_falling_edge_us_);
+  ESP_LOGD(TAG, "HDMICEC::send: waiting for the bus to be free...");
+  while(signal_free_us < MIN_SIGNAL_FREE_TIME) {
+    delay_microseconds_safe(TOTAL_BIT_US); // wait for one bit period
+  }
+  ESP_LOGD(TAG, "HDMICEC::send: bus available, sending frame...");
 
-  static const size_t MAX_ATTEMPTS = 5;
   for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
     bool success = send_frame_(frame, is_broadcast);
     if (success) {
@@ -91,7 +99,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
     }
   }
 
-  ESP_LOGE(TAG, "send failed after five attempts");
+  ESP_LOGE(TAG, "no ack received. send failed after five attempts");
   return false;
 }
 
@@ -192,11 +200,7 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
     self->last_falling_edge_us_ = now;
     return;
   }
-
   // otherwise, it's a rising edge, so it's time to process the pulse length
-  if (self->last_falling_edge_us_ == 0) {
-    return;
-  }
 
   auto pulse_duration = (micros() - self->last_falling_edge_us_);
   self->last_falling_edge_us_ = 0;
