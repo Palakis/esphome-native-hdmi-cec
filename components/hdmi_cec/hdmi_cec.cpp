@@ -109,7 +109,8 @@ bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) 
 
     // 3. send ack bit
     bool success = acknowledge_byte_(is_broadcast);
-    if (success) {
+    if (!success) {
+      // return early if something went wrong
       gpio_interrupt_disabled_ = false; // re-enable interrupts before exiting early
       return false;
     }
