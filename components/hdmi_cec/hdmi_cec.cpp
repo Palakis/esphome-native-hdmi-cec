@@ -161,9 +161,12 @@ bool HDMICEC::acknowledge_byte_(bool is_broadcast) {
   // sleep for the rest of the bit duration (TOTAL_BIT_US - HIGH_BIT_US - 400)
   delayMicroseconds(TOTAL_BIT_US - HIGH_BIT_US - ACK_WAIT_US);
 
+  // broadcast messages: line pulled low by any follower => something went wrong. no need to flip the value.
   if (is_broadcast) {
     return value;
   }
+
+  // normal messages: line pulled low by the target follower => message ACKed successfully. we need to flip the value to match that logic.
   return (!value);
 }
 
