@@ -74,6 +74,8 @@ void HDMICEC::loop() {
 }
 
 bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes) {
+  bool is_broadcast (destination == 0xF);
+
   // prepare the bytes to send
   uint8_t header = (((source & 0x0F) << 4) | (destination & 0x0F));
   std::vector<uint8_t> frame = { header };
@@ -81,10 +83,16 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
   // TODO wait for the bus to be free
 
-  bool is_broadcast (destination == 0xF);
-  send_frame_(frame, is_broadcast);
+  static const size_t MAX_ATTEMPTS = 5;
+  for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
+    bool success = send_frame_(frame, is_broadcast);
+    if (success) {
+      return true;
+    }
+  }
 
-  return true;
+  ESP_LOGE(TAG, "send failed after five attempts");
+  return false;
 }
 
 bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) {
