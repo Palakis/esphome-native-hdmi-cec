@@ -144,7 +144,7 @@ bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) 
     }
 
     // 2. send EOM bit (logic 1 if this is the last byte of the frame)
-    bool is_eom = (it == frame.end());
+    bool is_eom = (it == (frame.end() - 1));
     send_bit_(is_eom);
 
     // 3. send ack bit
