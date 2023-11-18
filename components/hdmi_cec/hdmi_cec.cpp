@@ -263,19 +263,13 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
 
 
     case DecoderState::WaitingForAck: {
-      // keep the line low, then tell the main loop we started sending an ack
-      self->isr_pin_.digital_write(false);
-      self->recv_ack_bit_started_ = true;
-
+      start_ack_(self);
       self->decoder_state_ = DecoderState::ReceivingByte;
       break;
     }
 
     case DecoderState::WaitingForEOMAck: {
-      // keep the line low, then tell the main loop we started sending an ack
-      self->isr_pin_.digital_write(false);
-      self->recv_ack_bit_started_ = true;
-
+      start_ack_(self);
       self->decoder_state_ = DecoderState::Idle;
       break;
     }
@@ -293,6 +287,21 @@ void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_byte_buffer_ = 0x0;
   self->recv_frame_buffer_.clear();
   self->recv_frame_buffer_.reserve(16);
+}
+
+void IRAM_ATTR HDMICEC::start_ack_(HDMICEC *self) {
+  if (self->recv_frame_buffer_.empty()) {
+    return;
+  }
+
+  uint8_t header = self->recv_frame_buffer_[0];
+  uint8_t destination = (header & 0x0F);
+
+  if (destination == self->address_) {
+    // keep the line low, then tell the main loop we started sending an ack
+    self->isr_pin_.digital_write(false);
+    self->recv_ack_bit_started_ = true;
+  }
 }
 
 }

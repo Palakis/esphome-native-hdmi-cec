@@ -39,6 +39,7 @@ public:
 protected:
   static void gpio_intr(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
+  static void start_ack_(HDMICEC *self);
   bool send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast);
   void send_start_bit_();
   void send_bit_(bool bit_value);
