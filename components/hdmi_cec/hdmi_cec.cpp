@@ -217,6 +217,20 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
   // on falling edge, store current time as the start of the low pulse
   if (level == false) {
     self->last_falling_edge_us_ = now;
+
+    if (self->recv_ack_queued_ == true) {
+      self->recv_ack_queued_ = false;
+
+      self->isr_pin_.pin_mode(OUTPUT_MODE_FLAGS);
+      self->isr_pin_.digital_write(false);
+      delayMicroseconds(LOW_BIT_US);
+      self->isr_pin_.digital_write(true);
+      self->isr_pin_.pin_mode(INPUT_MODE_FLAGS);
+
+      // trigger rising-edge interrupt manually
+      gpio_intr(self);
+    }
+
     return;
   }
   // otherwise, it's a rising edge, so it's time to process the pulse length
@@ -254,6 +268,12 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
     }
 
     case DecoderState::WaitingForEOM: {
+      // check if we need to acknowledge this byte on the next bit
+      uint8_t destination_address = (self->recv_frame_buffer_[0] & 0xF);
+      if (destination_address != 0xF && destination_address == self->address_) {
+        self->recv_ack_queued_ = true;
+      }
+
       bool isEOM = (value == 1);
       if (isEOM) {
         // pass frame to app
@@ -293,6 +313,7 @@ void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_byte_buffer_ = 0x0;
   self->recv_frame_buffer_.clear();
   self->recv_frame_buffer_.reserve(16);
+  self->recv_ack_queued_ = false;
 }
 
 }
