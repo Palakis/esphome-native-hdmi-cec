@@ -1,5 +1,6 @@
 #include "hdmi_cec.h"
 
+#include <algorithm>
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -17,6 +18,9 @@ static const uint32_t LOW_BIT_US = 1500;
 // arbitration and retransmission
 static const uint32_t MIN_SIGNAL_FREE_TIME = (TOTAL_BIT_US * 7);
 static const size_t MAX_ATTEMPTS = 5;
+
+static const gpio::Flags INPUT_MODE_FLAGS = gpio::FLAG_INPUT | gpio::FLAG_PULLUP;
+static const gpio::Flags OUTPUT_MODE_FLAGS = gpio::FLAG_OUTPUT | gpio::FLAG_PULLUP;
 
 std::string bytes_to_string(std::vector<uint8_t> bytes) {
   std::string result;
@@ -48,17 +52,6 @@ void HDMICEC::dump_config() {
 }
 
 void HDMICEC::loop() {
-  // send queued ack bit
-  if (recv_ack_bit_started_) {
-    recv_ack_bit_started_ = false;
-    
-    // // wait for the end of logical 0
-    // uint32_t low_wait_time = (LOW_BIT_US - (millis() - last_falling_edge_us_));
-    // delayMicroseconds(low_wait_time);
-    
-    // pin_->digital_write(true);
-  }
-
   while(!recv_queue_.empty()) {
     auto frame = recv_queue_.front();
     recv_queue_.pop();
@@ -150,10 +143,10 @@ bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) 
     send_bit_(is_eom);
 
     // 3. send ack bit
-    bool success = acknowledge_byte_(is_broadcast);
+    bool success = send_and_read_ack_(is_broadcast);
     // if (!success) {
     //   // return early if something went wrong
-    //   gpio_interrupt_disabled_ = false; // re-enable interrupts before exiting early
+    //   switch_to_listen_mode_();
     //   return false;
     // }
   }
@@ -189,7 +182,7 @@ void HDMICEC::send_bit_(bool bit_value) {
   delayMicroseconds(high_duration_us);
 }
 
-bool HDMICEC::acknowledge_byte_(bool is_broadcast) {
+bool HDMICEC::send_and_read_ack_(bool is_broadcast) {
   // send a Logical 1
   this->pin_->digital_write(false);
   delayMicroseconds(HIGH_BIT_US);
@@ -213,11 +206,11 @@ bool HDMICEC::acknowledge_byte_(bool is_broadcast) {
 }
 
 void HDMICEC::switch_to_listen_mode_() {
-  pin_->pin_mode(gpio::FLAG_INPUT | gpio::FLAG_PULLUP);
+  pin_->pin_mode(INPUT_MODE_FLAGS);
 }
 
 void HDMICEC::switch_to_send_mode_() {
-  pin_->pin_mode(gpio::FLAG_OUTPUT | gpio::FLAG_PULLUP);
+  pin_->pin_mode(OUTPUT_MODE_FLAGS);
   pin_->digital_write(true);
 }
 
@@ -282,13 +275,11 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
 
 
     case DecoderState::WaitingForAck: {
-      start_ack_(self);
       self->decoder_state_ = DecoderState::ReceivingByte;
       break;
     }
 
     case DecoderState::WaitingForEOMAck: {
-      start_ack_(self);
       self->decoder_state_ = DecoderState::Idle;
       break;
     }
@@ -306,21 +297,6 @@ void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_byte_buffer_ = 0x0;
   self->recv_frame_buffer_.clear();
   self->recv_frame_buffer_.reserve(16);
-}
-
-void IRAM_ATTR HDMICEC::start_ack_(HDMICEC *self) {
-  if (self->recv_frame_buffer_.empty()) {
-    return;
-  }
-
-  uint8_t header = self->recv_frame_buffer_[0];
-  uint8_t destination = (header & 0x0F);
-
-  if (destination == self->address_) {
-    // keep the line low, then tell the main loop we started sending an ack
-    // self->isr_pin_.digital_write(false);
-    self->recv_ack_bit_started_ = true;
-  }
 }
 
 }

@@ -39,11 +39,10 @@ public:
 protected:
   static void gpio_intr(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
-  static void start_ack_(HDMICEC *self);
   bool send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast);
   void send_start_bit_();
   void send_bit_(bool bit_value);
-  bool acknowledge_byte_(bool is_broadcast);
+  bool send_and_read_ack_(bool is_broadcast);
   void switch_to_listen_mode_();
   void switch_to_send_mode_();
 
@@ -59,7 +58,6 @@ protected:
   uint8_t recv_byte_buffer_;
   std::vector<uint8_t> recv_frame_buffer_;
   std::queue<std::vector<uint8_t>> recv_queue_;
-  bool recv_ack_bit_started_;
 };
 
 class MessageTrigger : public Trigger<uint8_t, uint8_t, std::vector<uint8_t>> {
