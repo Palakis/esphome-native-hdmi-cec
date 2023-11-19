@@ -34,16 +34,16 @@ std::string bytes_to_string(std::vector<uint8_t> bytes) {
 }
 
 void HDMICEC::setup() {
-  this->isr_pin_ = this->pin_->to_isr();
-  this->recv_frame_buffer_.reserve(16); // max 16 bytes per CEC frame
-  this->pin_->pin_mode(gpio::FLAG_INPUT | gpio::FLAG_OUTPUT | gpio::FLAG_PULLUP);
-  this->pin_->attach_interrupt(HDMICEC::gpio_intr, this, gpio::INTERRUPT_ANY_EDGE);
+  isr_pin_ = pin_->to_isr();
+  recv_frame_buffer_.reserve(16); // max 16 bytes per CEC frame
+  pin_->attach_interrupt(HDMICEC::gpio_intr, this, gpio::INTERRUPT_ANY_EDGE);
+  switch_to_listen_mode_();
 }
 
 void HDMICEC::dump_config() {
   ESP_LOGCONFIG(TAG, "HDMI-CEC");
-  LOG_PIN("  pin: ", this->pin_);
-  ESP_LOGCONFIG(TAG, "  address: %x", this->address_);
+  LOG_PIN("  pin: ", pin_);
+  ESP_LOGCONFIG(TAG, "  address: %x", address_);
   ESP_LOGCONFIG(TAG, "  promiscuous mode: %s", (promiscuous_mode_ ? "yes" : "no"));
 }
 
@@ -52,11 +52,11 @@ void HDMICEC::loop() {
   if (recv_ack_bit_started_) {
     recv_ack_bit_started_ = false;
     
-    // wait for the end of logical 0
-    uint32_t low_wait_time = (LOW_BIT_US - (millis() - last_falling_edge_us_));
-    delayMicroseconds(low_wait_time);
+    // // wait for the end of logical 0
+    // uint32_t low_wait_time = (LOW_BIT_US - (millis() - last_falling_edge_us_));
+    // delayMicroseconds(low_wait_time);
     
-    pin_->digital_write(true);
+    // pin_->digital_write(true);
   }
 
   while(!recv_queue_.empty()) {
@@ -109,10 +109,13 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   frame.insert(frame.end(), data_bytes.begin(), data_bytes.end());
 
   // wait for the bus to be free
-  uint32_t signal_free_us = (millis() - last_falling_edge_us_);
+  const uint32_t now = millis();
+  uint32_t signal_free_us = (now - last_falling_edge_us_);
   ESP_LOGD(TAG, "HDMICEC::send: waiting for the bus to be free...");
-  while(signal_free_us < MIN_SIGNAL_FREE_TIME) {
-    delay_microseconds_safe(TOTAL_BIT_US); // wait for one bit period
+  if (now > MIN_SIGNAL_FREE_TIME) {
+    while(signal_free_us < MIN_SIGNAL_FREE_TIME) {
+      delay_microseconds_safe(TOTAL_BIT_US); // wait for one bit period
+    }
   }
   ESP_LOGD(TAG, "HDMICEC::send: bus available, sending frame...");
 
@@ -128,8 +131,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 }
 
 bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) {
-  // disable the GPIO interrupt
-  gpio_interrupt_disabled_ = true;
+  switch_to_send_mode_();
 
   send_start_bit_();
   
@@ -149,15 +151,14 @@ bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) 
 
     // 3. send ack bit
     bool success = acknowledge_byte_(is_broadcast);
-    if (!success) {
-      // return early if something went wrong
-      gpio_interrupt_disabled_ = false; // re-enable interrupts before exiting early
-      return false;
-    }
+    // if (!success) {
+    //   // return early if something went wrong
+    //   gpio_interrupt_disabled_ = false; // re-enable interrupts before exiting early
+    //   return false;
+    // }
   }
 
-  // re-enable the GPIO interrupt
-  gpio_interrupt_disabled_ = false;
+  switch_to_listen_mode_();
 
   return true;
 }
@@ -211,11 +212,16 @@ bool HDMICEC::acknowledge_byte_(bool is_broadcast) {
   return (!value);
 }
 
-void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
-  if (self->gpio_interrupt_disabled_) {
-    return;
-  }
+void HDMICEC::switch_to_listen_mode_() {
+  pin_->pin_mode(gpio::FLAG_INPUT | gpio::FLAG_PULLUP);
+}
 
+void HDMICEC::switch_to_send_mode_() {
+  pin_->pin_mode(gpio::FLAG_OUTPUT | gpio::FLAG_PULLUP);
+  pin_->digital_write(true);
+}
+
+void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
   const uint32_t now = micros();
   const bool level = self->isr_pin_.digital_read();
 
@@ -312,7 +318,7 @@ void IRAM_ATTR HDMICEC::start_ack_(HDMICEC *self) {
 
   if (destination == self->address_) {
     // keep the line low, then tell the main loop we started sending an ack
-    self->isr_pin_.digital_write(false);
+    // self->isr_pin_.digital_write(false);
     self->recv_ack_bit_started_ = true;
   }
 }

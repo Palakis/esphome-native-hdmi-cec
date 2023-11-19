@@ -44,6 +44,8 @@ protected:
   void send_start_bit_();
   void send_bit_(bool bit_value);
   bool acknowledge_byte_(bool is_broadcast);
+  void switch_to_listen_mode_();
+  void switch_to_send_mode_();
 
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
@@ -51,7 +53,6 @@ protected:
   bool promiscuous_mode_;
   std::vector<MessageTrigger*> message_triggers_;
 
-  bool gpio_interrupt_disabled_;
   uint32_t last_falling_edge_us_;
   DecoderState decoder_state_;
   uint8_t recv_bit_counter_;
