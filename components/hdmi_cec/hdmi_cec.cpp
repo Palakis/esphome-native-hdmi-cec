@@ -56,18 +56,18 @@ void HDMICEC::loop() {
     auto frame = recv_queue_.front();
     recv_queue_.pop();
 
-    if (frame.size() == 1) {
-      // TODO respond to pings to our address
-      // for now, ignore pings
-      continue;
-    }
-
     uint8_t header = frame[0];
     uint8_t src_addr = ((header & 0xF0) >> 4);
     uint8_t dest_addr = (header & 0x0F);
 
     if (!promiscuous_mode_ && (dest_addr != 0x0F) && (dest_addr != address_)) {
       // ignore frames not meant for us
+      continue;
+    }
+
+    if (frame.size() == 1) {
+      // don't process pings. they're already dealt with by the acknowledgement mechanism
+      ESP_LOGD(TAG, "ping received: 0x%01X -> 0x%01X", src_addr, dest_addr);
       continue;
     }
 
