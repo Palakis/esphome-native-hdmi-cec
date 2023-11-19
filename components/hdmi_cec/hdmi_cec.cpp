@@ -140,11 +140,11 @@ bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) 
 
     // 3. send ack bit
     bool success = send_and_read_ack_(is_broadcast);
-    // if (!success) {
-    //   // return early if something went wrong
-    //   switch_to_listen_mode_();
-    //   return false;
-    // }
+    if (!success) {
+      // return early if something went wrong
+      switch_to_listen_mode_();
+      return false;
+    }
   }
 
   switch_to_listen_mode_();
