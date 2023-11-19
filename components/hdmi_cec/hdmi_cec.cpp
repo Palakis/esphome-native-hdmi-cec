@@ -101,20 +101,16 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   std::vector<uint8_t> frame = { header };
   frame.insert(frame.end(), data_bytes.begin(), data_bytes.end());
 
-  // wait for the bus to be free
-  const uint32_t now = millis();
-  uint32_t signal_free_us = (now - last_falling_edge_us_);
-  ESP_LOGD(TAG, "HDMICEC::send: waiting for the bus to be free...");
-  if (now > MIN_SIGNAL_FREE_TIME) {
-    while(signal_free_us < MIN_SIGNAL_FREE_TIME) {
-      delay_microseconds_safe(TOTAL_BIT_US); // wait for one bit period
-    }
+  ESP_LOGD(TAG, "HDMICEC::send(): waiting for the bus to be free...");
+  while((micros() - last_falling_edge_us_) < MIN_SIGNAL_FREE_TIME) {
+    delay_microseconds_safe(TOTAL_BIT_US); // wait for one bit period
   }
-  ESP_LOGD(TAG, "HDMICEC::send: bus available, sending frame...");
+  ESP_LOGD(TAG, "HDMICEC::send(): bus available, sending frame...");
 
   for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
     bool success = send_frame_(frame, is_broadcast);
     if (success) {
+      ESP_LOGD(TAG, "HDMICEC::send(): frame sent and acknowledged");
       return true;
     }
   }
