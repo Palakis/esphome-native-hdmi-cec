@@ -54,7 +54,7 @@ void HDMICEC::loop() {
     
     // wait for the end of logical 0
     uint32_t low_wait_time = (LOW_BIT_US - (millis() - last_falling_edge_us_));
-    delay_microseconds_safe(low_wait_time);
+    delayMicroseconds(low_wait_time);
     
     pin_->digital_write(true);
   }
