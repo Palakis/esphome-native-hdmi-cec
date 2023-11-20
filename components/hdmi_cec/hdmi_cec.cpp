@@ -124,12 +124,15 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   return false;
 }
 
-bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) {
+bool IRAM_ATTR HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) {
+  InterruptLock interrupt_lock;
+
   switch_to_send_mode_();
 
   send_start_bit_();
   
   // for each byte of the frame:
+  bool success = true;
   for (auto it = frame.begin(); it != frame.end(); ++it) {
     uint8_t current_byte = *it;
 
@@ -144,20 +147,20 @@ bool HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) 
     send_bit_(is_eom);
 
     // 3. send ack bit
-    bool success = send_and_read_ack_(is_broadcast);
-    if (!success) {
+    bool ack_success = send_and_read_ack_(is_broadcast);
+    if (!ack_success) {
       // return early if something went wrong
-      switch_to_listen_mode_();
-      return false;
+      success = false;
+      break;
     }
   }
 
   switch_to_listen_mode_();
 
-  return true;
+  return success;
 }
 
-void HDMICEC::send_start_bit_() {
+void IRAM_ATTR HDMICEC::send_start_bit_() {
   // 1. pull low for 3700 us
   this->pin_->digital_write(false);
   delayMicroseconds(3700);
@@ -169,7 +172,7 @@ void HDMICEC::send_start_bit_() {
   // total duration of start bit: 4500 us
 }
 
-void HDMICEC::send_bit_(bool bit_value) {
+void IRAM_ATTR HDMICEC::send_bit_(bool bit_value) {
   // total bit duration:
   // logic 1: pull low for 600 us, then pull high for 1800 us
   // logic 0: pull low for 1500 us, then pull high for 900 us
@@ -183,7 +186,7 @@ void HDMICEC::send_bit_(bool bit_value) {
   delayMicroseconds(high_duration_us);
 }
 
-bool HDMICEC::send_and_read_ack_(bool is_broadcast) {
+bool IRAM_ATTR HDMICEC::send_and_read_ack_(bool is_broadcast) {
   // send a Logical 1
   this->pin_->digital_write(false);
   delayMicroseconds(HIGH_BIT_US);
@@ -206,11 +209,11 @@ bool HDMICEC::send_and_read_ack_(bool is_broadcast) {
   return (!value);
 }
 
-void HDMICEC::switch_to_listen_mode_() {
+void IRAM_ATTR HDMICEC::switch_to_listen_mode_() {
   pin_->pin_mode(INPUT_MODE_FLAGS);
 }
 
-void HDMICEC::switch_to_send_mode_() {
+void IRAM_ATTR HDMICEC::switch_to_send_mode_() {
   pin_->pin_mode(OUTPUT_MODE_FLAGS);
   pin_->digital_write(true);
 }
