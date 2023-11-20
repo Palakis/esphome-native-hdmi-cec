@@ -241,15 +241,15 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
 
   if (pulse_duration > START_BIT_MIN_US) {
     // start bit detected. reset everything and start receiving
-    self->decoder_state_ = DecoderState::ReceivingByte;
+    self->receiver_state_ = ReceiverState::ReceivingByte;
     reset_state_variables_(self);
     return;
   }
 
   bool value = (pulse_duration >= HIGH_BIT_MIN_US && pulse_duration <= HIGH_BIT_MAX_US);
 
-  switch (self->decoder_state_) {
-    case DecoderState::ReceivingByte: {
+  switch (self->receiver_state_) {
+    case ReceiverState::ReceivingByte: {
       // write bit to the current byte
       self->recv_byte_buffer_ = (self->recv_byte_buffer_ << 1) | (value & 0b1);
 
@@ -261,14 +261,14 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
         self->recv_bit_counter_ = 0;
         self->recv_byte_buffer_ = 0;
 
-        self->decoder_state_ = DecoderState::WaitingForEOM;
+        self->receiver_state_ = ReceiverState::WaitingForEOM;
       } else {
-        self->decoder_state_ = DecoderState::ReceivingByte;
+        self->receiver_state_ = ReceiverState::ReceivingByte;
       }
       break;
     }
 
-    case DecoderState::WaitingForEOM: {
+    case ReceiverState::WaitingForEOM: {
       // check if we need to acknowledge this byte on the next bit
       uint8_t destination_address = (self->recv_frame_buffer_[0] & 0xF);
       if (destination_address != 0xF && destination_address == self->address_) {
@@ -282,27 +282,27 @@ void IRAM_ATTR HDMICEC::gpio_intr(HDMICEC *self) {
         reset_state_variables_(self);
       }
 
-      self->decoder_state_ = (
+      self->receiver_state_ = (
         isEOM
-        ? DecoderState::WaitingForEOMAck
-        : DecoderState::WaitingForAck
+        ? ReceiverState::WaitingForEOMAck
+        : ReceiverState::WaitingForAck
       );
       break;
     }
 
 
-    case DecoderState::WaitingForAck: {
-      self->decoder_state_ = DecoderState::ReceivingByte;
+    case ReceiverState::WaitingForAck: {
+      self->receiver_state_ = ReceiverState::ReceivingByte;
       break;
     }
 
-    case DecoderState::WaitingForEOMAck: {
-      self->decoder_state_ = DecoderState::Idle;
+    case ReceiverState::WaitingForEOMAck: {
+      self->receiver_state_ = ReceiverState::Idle;
       break;
     }
 
     default: {
-      self->decoder_state_ = DecoderState::ReceivingByte;
+      self->receiver_state_ = ReceiverState::ReceivingByte;
       reset_state_variables_(self);
       break;
     }

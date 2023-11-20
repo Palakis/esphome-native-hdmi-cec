@@ -10,7 +10,7 @@
 namespace esphome {
 namespace hdmi_cec {
 
-enum class DecoderState : uint8_t {
+enum class ReceiverState : uint8_t {
   Idle = 0,
   ReceivingByte = 2,
   WaitingForEOM = 3,
@@ -53,7 +53,7 @@ protected:
   std::vector<MessageTrigger*> message_triggers_;
 
   uint32_t last_falling_edge_us_;
-  DecoderState decoder_state_;
+  ReceiverState receiver_state_;
   uint8_t recv_bit_counter_;
   uint8_t recv_byte_buffer_;
   std::vector<uint8_t> recv_frame_buffer_;
