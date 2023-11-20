@@ -37,6 +37,13 @@ hdmi_cec:
   pin: GPIO26
   address: 0x5
   on_message:
+    # Handle CEC Version requests
+    - opcode: 0x9F
+      then:
+        hdmi_cec.send:
+          destination: !lambda return source;
+          data: [0x9E, 0x04]
+
     # Give OSD name
     - opcode: 0x46
       then:
