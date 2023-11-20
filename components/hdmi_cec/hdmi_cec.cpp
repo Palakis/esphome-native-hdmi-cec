@@ -94,7 +94,7 @@ void HDMICEC::loop() {
 }
 
 bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes) {
-  bool is_broadcast (destination == 0xF);
+  bool is_broadcast = (destination == 0xF);
 
   // prepare the bytes to send
   uint8_t header = (((source & 0x0F) << 4) | (destination & 0x0F));
