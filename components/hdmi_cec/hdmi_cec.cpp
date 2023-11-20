@@ -101,19 +101,23 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   std::vector<uint8_t> frame = { header };
   frame.insert(frame.end(), data_bytes.begin(), data_bytes.end());
 
-  ESP_LOGV(TAG, "HDMICEC::send(): waiting for the bus to be free...");
-  while((micros() - last_falling_edge_us_) < MIN_SIGNAL_FREE_TIME) {
-    delay_microseconds_safe(TOTAL_BIT_US); // wait for one bit period
-  }
-  ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
+  {
+    LockGuard send_lock(send_mutex_);
 
-  for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
-    bool success = send_frame_(frame, is_broadcast);
-    if (success) {
-      ESP_LOGV(TAG, "HDMICEC::send(): frame sent and acknowledged");
-      return true;
+    ESP_LOGV(TAG, "HDMICEC::send(): waiting for the bus to be free...");
+    while((micros() - last_falling_edge_us_) < MIN_SIGNAL_FREE_TIME) {
+      delay_microseconds_safe(TOTAL_BIT_US); // wait for one bit period
     }
-    delay_microseconds_safe(TOTAL_BIT_US);
+    ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
+
+    for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
+      bool success = send_frame_(frame, is_broadcast);
+      if (success) {
+        ESP_LOGV(TAG, "HDMICEC::send(): frame sent and acknowledged");
+        return true;
+      }
+      delay_microseconds_safe(TOTAL_BIT_US);
+    }
   }
 
   ESP_LOGE(TAG, "no ack received. send failed after five attempts");
