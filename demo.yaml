@@ -37,15 +37,24 @@ hdmi_cec:
   pin: GPIO26
   address: 0x5
   on_message:
-    - opcode: 0xC3
+    # Give OSD name
+    - opcode: 0x46
       then:
-        logger.log: "ARC Start Requested"
+        hdmi_cec.send:
+          destination: 0x0
+          data: [0x47, 0x65, 0x73, 0x70, 0x68, 0x6F, 0x6D, 0x65] # esphome
+
+    # Volume Up
     - data: [0x44, 0x41]
       then:
         logger.log: "Volume Up"
+
+    # Volume Down
     - data: [0x44, 0x42]
       then:
         logger.log: "Volume Down"
+
+    # Mute
     - data: [0x44, 0x43]
       then:
-        logger.log: "Mute"
+        - logger.log: "Mute"
