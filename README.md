@@ -5,18 +5,21 @@ Make your ESPHome devices speak the (machine) language of your living room with 
 ## Features
 
 - Native CEC 1.3a implementation
-    - Implemented from scratch specifically for this component. No third-party CEC library.
+    - Implemented from scratch specifically for this component. No third-party CEC library used.
     - Meant to be as simple, lightweight and easy-to-understand as possible
 - Receive CEC commands
-    - Acknowledgements handled automatically
-    - Handle incoming messages with the `on_message` trigger
-    - Interrupts-based receiver. No polling.
+    - Interrupts-based receiver (no polling at all). Handles low-level byte acknowledgements
+    - Handle incoming messages with `on_message` triggers
+      - Each trigger specified in `on_message` supports filtering based on source, destination, opcode and/or message contents
 - Send CEC commands
     - Built-in `hdmi_cec.send` action
+- Built-in handlers for some system commands :
+    - _"Get CEC Version"_
+    - _"Give Device Power Status"_
+    - _"Give OSD Name"_
 
 ### To-do list
 
-- Handle system messages like _"Get CEC Version"_ natively
 - Handle Physical Address Queries and Discovery
 
 ## Installation
@@ -39,15 +42,35 @@ external_components:
 
 ```yaml
 hdmi_cec:
-  pin: GPIO26 # Pick a GPIO pin that can do both input AND output
-  address: 0x3 # 0x3 => "Tuner 1"
+  # Pick a GPIO pin that can do both input AND output
+  pin: GPIO26 # Required
+  # The address can be anything you want. Use 0xF if you only want to listen to the bus and not act like a standard device
+  address: 0x3 # Required
+  # The name that will we displayed in the list of devices on your TV/receiver
+  osd_name: "my device" # Optional. Defaults to "esphome"
+  # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
+  # the address configured above) and broadcast messages. Enabling promiscuous mode will make the component
+  # listen for all messages (both in logs and the on_message triggers)
+  promiscuous_mode: false # Optional. Defaults to false
+  # List of triggers to handle specific commands. Each trigger has the following optional filter parameters:
+  # - "source": match messages coming from the specified address
+  # - "destination": match messages meant for the specified address
+  # - "opcode": match messages bearing the specified opcode
+  # - "data": exact-match on message content
+  # Actions called from these triggers is called with "source", "destination" and "data" as parameters
   on_message:
-    # Handle CEC Version requests
-    - opcode: 0x9F
+    - opcode: 0x36 # opcode for "Standby"
+      then:
+        logger.log: "Got Standby command"
+    
+    # Respond to "Menu Request" (not required, example purposes only)
+    - opcode: 0x8D
       then:
         hdmi_cec.send:
+          # both "destination" and "data" are templatable
           destination: !lambda return source;
-          data: [0x9E, 0x04]
+          data: [0x8E, 0x01] # 0x01 => "Menu Deactivated"
+
 ```
 
 4. (optional) Use the `hdmi_cec.send` action in your ESPHome configuration
@@ -58,8 +81,9 @@ button:
     name: "Turn everything off"
     on_press:
       hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0xF # Broadcast
-        data: [0x36] # Standby opcode
+        data: [0x36] # "Standby" opcode
 ```
 
 ## Compatibility
