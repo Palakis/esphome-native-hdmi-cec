@@ -7,20 +7,21 @@ Make your ESPHome devices speak the (machine) language of your living room with 
 - Native CEC 1.3a implementation
     - Implemented from scratch specifically for this component. No third-party CEC library used.
     - Meant to be as simple, lightweight and easy-to-understand as possible
-- Receive CEC commands
     - Interrupts-based receiver (no polling at all). Handles low-level byte acknowledgements
+- Receive CEC commands
     - Handle incoming messages with `on_message` triggers
       - Each trigger specified in `on_message` supports filtering based on source, destination, opcode and/or message contents
+    - Built-in handlers for some of the system commands defined in the spec :
+      - _"Get CEC Version"_
+      - _"Give Device Power Status"_
+      - _"Give OSD Name"_
 - Send CEC commands
     - Built-in `hdmi_cec.send` action
-- Built-in handlers for some system commands :
-    - _"Get CEC Version"_
-    - _"Give Device Power Status"_
-    - _"Give OSD Name"_
 
 ### To-do list
 
 - Handle Physical Address Queries and Discovery
+- Ability to override built-in command handlers
 
 ## Installation
 
@@ -45,7 +46,7 @@ hdmi_cec:
   # Pick a GPIO pin that can do both input AND output
   pin: GPIO26 # Required
   # The address can be anything you want. Use 0xF if you only want to listen to the bus and not act like a standard device
-  address: 0x3 # Required
+  address: 0xE # Required
   # The name that will we displayed in the list of devices on your TV/receiver
   osd_name: "my device" # Optional. Defaults to "esphome"
   # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
