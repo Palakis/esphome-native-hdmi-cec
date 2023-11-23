@@ -20,7 +20,6 @@ Make your ESPHome devices speak the (machine) language of your living room with 
 
 ### To-do list
 
-- Built-in command handler for the "Give Physical Address" request
 - Automatic Physical Address Discovery through E-DDC
 - Ability to override built-in command handlers
 
