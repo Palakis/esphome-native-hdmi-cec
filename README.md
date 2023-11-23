@@ -48,6 +48,9 @@ hdmi_cec:
   pin: GPIO26 # Required
   # The address can be anything you want. Use 0xF if you only want to listen to the bus and not act like a standard device
   address: 0xE # Required
+  # Physical address of the device. In this case: 4.0.0.0 (HDMI4 on the TV)
+  # DDC support is not yet implemented, so you'll have to set this manually.
+  physical_address: 0x4000 # Required
   # The name that will we displayed in the list of devices on your TV/receiver
   osd_name: "my device" # Optional. Defaults to "esphome"
   # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
