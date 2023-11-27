@@ -93,7 +93,7 @@ button:
 
 - ESP32: ✅ **tested, works**
 - ESP8266: ✅ **tested, works**
-- RP2040: ❔ _untested_
+- RP2040: ✅ **tested, works**
 - LibreTiny: ❌ **not supported**
   - I don't have any LibreTiny device at hand. Feel free to run your own tests and report back your findings.
 
