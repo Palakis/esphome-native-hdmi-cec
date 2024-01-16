@@ -1,4 +1,4 @@
-# ESPHome HDMI-CEC Component
+# ESPHome Native HDMI-CEC Component
 
 Make your ESPHome devices speak the (machine) language of your living room with this native HDMI-CEC (Consumer Electronics Control) component!
 
