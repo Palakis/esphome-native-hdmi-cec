@@ -55,6 +55,9 @@ hdmi_cec:
   # the address configured above) and broadcast messages. Enabling promiscuous mode will make the component
   # listen for all messages (both in logs and the on_message triggers)
   promiscuous_mode: false # Optional. Defaults to false
+  # By default, monitor mode is disabled, so the component can send messages and acknowledge incoming messages.
+  # Enabling monitor mode lets the component act as a passive listener, disabling active manipulation of the CEC bus.
+  monitor_mode: false # Optional. Defaults to false
   # List of triggers to handle specific commands. Each trigger has the following optional filter parameters:
   # - "source": match messages coming from the specified address
   # - "destination": match messages meant for the specified address
