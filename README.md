@@ -92,6 +92,24 @@ button:
         data: [0x36] # "Standby" opcode
 ```
 
+5. (optional) Add Services for HomeAssistant
+
+```
+api
+  ...
+  services:
+    - service: hdmi_cec_send
+      variables:
+        cec_destination: int
+        cec_data: int[]
+      then:
+        - hdmi_cec.send:
+            destination: !lambda "return static_cast<unsigned char>(cec_destination);"
+            data: !lambda "std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;"
+```
+
+
+
 ## Compatibility
 
 - ESP32: ✅ **tested, works**
