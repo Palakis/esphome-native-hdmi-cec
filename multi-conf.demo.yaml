@@ -1,0 +1,68 @@
+esphome:
+  name: "hdmi-cec-demo"
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret encryption_key
+  services:
+    - service: hdmi_cec1_send
+      variables:
+        cec_source: int
+        cec_destination: int
+        cec_data: int[]
+      then:
+        - hdmi_cec.send:
+            cec_id: cec1
+            source: !lambda 'return static_cast<unsigned char>(cec_source);'
+            destination: !lambda 'return static_cast<unsigned char>(cec_destination);'
+            data: !lambda 'std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;'
+    - service: hdmi_cec2_send
+      variables:
+        cec_source: int
+        cec_destination: int
+        cec_data: int[]
+      then:
+        - hdmi_cec.send:
+            cec_id: cec2
+            source: !lambda 'return static_cast<unsigned char>(cec_source);'
+            destination: !lambda 'return static_cast<unsigned char>(cec_destination);'
+            data: !lambda 'std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;'
+
+# Enable OTA
+ota:
+  password: !secret mgmt_pass
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: True
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+
+captive_portal:
+
+hdmi_cec:
+  - id: cec1
+    pin: GPIO26
+    address: 0x5
+    physical_address: 0x4000
+    
+  - id: cec2
+    pin: GPIO27
+    address: 0x5
+    physical_address: 0x4000
