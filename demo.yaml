@@ -26,8 +26,7 @@ api:
         cec_data: int[]
       then:
         - hdmi_cec.send:
-            # source: !lambda 'return static_cast<unsigned char>(cec_source);'
-            source: 0x0
+            source: !lambda 'return static_cast<unsigned char>(cec_source);'
             destination: !lambda 'return static_cast<unsigned char>(cec_destination);'
             data: !lambda 'std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;'
 
@@ -46,7 +45,6 @@ wifi:
 captive_portal:
 
 hdmi_cec:
-  id: cec1
   pin: GPIO26
   address: 0x5
   physical_address: 0x4000
@@ -65,23 +63,3 @@ hdmi_cec:
     - data: [0x44, 0x43]
       then:
         - logger.log: "Mute"
-    
-  # - id: cec2
-  #   pin: GPIO27
-  #   address: 0x5
-  #   physical_address: 0x4000
-  #   on_message:
-  #     # Volume Up
-  #     - data: [0x44, 0x41]
-  #       then:
-  #         logger.log: "Volume Up"
-
-  #     # Volume Down
-  #     - data: [0x44, 0x42]
-  #       then:
-  #         logger.log: "Volume Down"
-
-  #     # Mute
-  #     - data: [0x44, 0x43]
-  #       then:
-  #         - logger.log: "Mute"
