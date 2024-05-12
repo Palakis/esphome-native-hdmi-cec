@@ -64,5 +64,5 @@ hdmi_cec:
     
   - id: cec2
     pin: GPIO27
-    address: 0x5
+    address: 0x6
     physical_address: 0x4000
