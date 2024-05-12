@@ -42,10 +42,16 @@ wifi:
 
 captive_portal:
 
+i2c:
+  id: ddc
+  sda: GPIO32
+  scl: GPIO33
+
 hdmi_cec:
   pin: GPIO26
   address: 0x5
   physical_address: 0x4000
+  ddc_i2c_id: ddc
   on_message:
     # Volume Up
     - data: [0x44, 0x41]

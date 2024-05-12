@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins, automation
+from esphome.components import i2c
 from esphome.const import (
     CONF_ID,
     CONF_TRIGGER_ID
@@ -8,14 +9,15 @@ from esphome.const import (
 
 CODEOWNERS = ["@Palakis"]
 
+# Component settings
 CONF_PIN = "pin"
 CONF_ADDRESS = "address"
 CONF_PHYSICAL_ADDRESS = "physical_address"
+CONF_DDC_I2C_ID = "ddc_i2c_id"
 CONF_PROMISCUOUS_MODE = "promiscuous_mode"
 CONF_MONITOR_MODE = "monitor_mode"
 CONF_OSD_NAME = "osd_name"
 CONF_ON_MESSAGE = "on_message"
-
 CONF_SOURCE = "source"
 CONF_DESTINATION = "destination"
 CONF_OPCODE = "opcode"
@@ -54,25 +56,29 @@ SendAction = hdmi_cec_ns.class_(
     "SendAction", automation.Action
 )
 
-CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
-    {
-        cv.GenerateID(): cv.declare_id(HDMICEC),
-        cv.Required(CONF_PIN): pins.internal_gpio_output_pin_schema,
-        cv.Required(CONF_ADDRESS): cv.int_range(min=0, max=15),
-        cv.Required(CONF_PHYSICAL_ADDRESS): cv.uint16_t,
-        cv.Optional(CONF_PROMISCUOUS_MODE, False): cv.boolean,
-        cv.Optional(CONF_MONITOR_MODE, False): cv.boolean,
-        cv.Optional(CONF_OSD_NAME, "esphome"): validate_osd_name,
-        cv.Optional(CONF_ON_MESSAGE): automation.validate_automation(
-            {
-                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(MessageTrigger),
-                cv.Optional(CONF_SOURCE): cv.int_range(min=0, max=15),
-                cv.Optional(CONF_DESTINATION): cv.int_range(min=0, max=15),
-                cv.Optional(CONF_OPCODE): cv.uint8_t,
-                cv.Optional(CONF_DATA): validate_data_array
-            }
-        )
-    }
+CONFIG_SCHEMA = (
+    cv.COMPONENT_SCHEMA
+    .extend(
+        {
+            cv.GenerateID(): cv.declare_id(HDMICEC),
+            cv.Required(CONF_PIN): pins.internal_gpio_output_pin_schema,
+            cv.Required(CONF_ADDRESS): cv.int_range(min=0, max=15),
+            cv.Required(CONF_PHYSICAL_ADDRESS): cv.uint16_t,
+            cv.Optional(CONF_PROMISCUOUS_MODE, False): cv.boolean,
+            cv.Optional(CONF_MONITOR_MODE, False): cv.boolean,
+            cv.Optional(CONF_OSD_NAME, "esphome"): validate_osd_name,
+            cv.Optional(CONF_DDC_I2C_ID): cv.use_id(i2c.I2CBus),
+            cv.Optional(CONF_ON_MESSAGE): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(MessageTrigger),
+                    cv.Optional(CONF_SOURCE): cv.int_range(min=0, max=15),
+                    cv.Optional(CONF_DESTINATION): cv.int_range(min=0, max=15),
+                    cv.Optional(CONF_OPCODE): cv.uint8_t,
+                    cv.Optional(CONF_DATA): validate_data_array
+                }
+            )
+        }
+    )
 )
 
 async def to_code(config):
@@ -91,6 +97,11 @@ async def to_code(config):
     osd_name_bytes = [x for x in osd_name_bytes] # convert byte array to int array
     osd_name_bytes = cg.std_vector.template(cg.uint8)(osd_name_bytes)
     cg.add(var.set_osd_name_bytes(osd_name_bytes))
+
+    ddc_i2c_id_ = config.get(CONF_DDC_I2C_ID)
+    if ddc_i2c_id_ is not None:
+        ddc_i2c_bus_ = await cg.get_variable(ddc_i2c_id_)
+        cg.add(var.set_ddc_i2c_bus(ddc_i2c_bus_))
 
     for conf in config.get(CONF_ON_MESSAGE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
