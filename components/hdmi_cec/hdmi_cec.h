@@ -6,9 +6,12 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/automation.h"
+#include "esphome/components/i2c/i2c.h"
 
 namespace esphome {
 namespace hdmi_cec {
+
+using namespace i2c;
 
 std::string bytes_to_string(std::vector<uint8_t> bytes);
 
@@ -31,6 +34,7 @@ public:
   void set_promiscuous_mode(bool promiscuous_mode) { promiscuous_mode_ = promiscuous_mode; }
   void set_monitor_mode(bool monitor_mode) { monitor_mode_ = monitor_mode; }
   void set_osd_name_bytes(const std::vector<uint8_t> &osd_name_bytes) { osd_name_bytes_ = osd_name_bytes; }
+  void set_ddc_i2c_bus(I2CBus *bus) { ddc_i2c_bus_ = bus; }
   void add_message_trigger(MessageTrigger *trigger) { message_triggers_.push_back(trigger); }
 
   bool send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes);
@@ -59,6 +63,7 @@ protected:
   bool promiscuous_mode_;
   bool monitor_mode_;
   std::vector<uint8_t> osd_name_bytes_;
+  I2CBus *ddc_i2c_bus_;
   std::vector<MessageTrigger*> message_triggers_;
 
   uint32_t last_falling_edge_us_;

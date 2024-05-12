@@ -1,4 +1,5 @@
 #include "hdmi_cec.h"
+#include "ddc_reader.h"
 
 #include "esphome/core/log.h"
 
@@ -40,6 +41,12 @@ void HDMICEC::setup() {
   this->pin_->setup();  
   isr_pin_ = pin_->to_isr();
   recv_frame_buffer_.reserve(16); // max 16 bytes per CEC frame
+
+  if (ddc_i2c_bus_) {
+    auto ddc_reader = DDCReader(ddc_i2c_bus_);
+    // TODO probe DDC for physical address
+  }
+
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   switch_to_listen_mode_();
 }
@@ -50,6 +57,11 @@ void HDMICEC::dump_config() {
   ESP_LOGCONFIG(TAG, "  address: %x", address_);
   ESP_LOGCONFIG(TAG, "  promiscuous mode: %s", (promiscuous_mode_ ? "yes" : "no"));
   ESP_LOGCONFIG(TAG, "  monitor mode: %s", (monitor_mode_ ? "yes" : "no"));
+  if (ddc_i2c_bus_) {
+    ESP_LOGCONFIG(TAG, "  DDC configured");
+  } else {
+    ESP_LOGCONFIG(TAG, "  DDC not configured");
+  }
 }
 
 void HDMICEC::loop() {
