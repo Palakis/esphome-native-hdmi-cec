@@ -20,7 +20,7 @@ CONF_SOURCE = "source"
 CONF_DESTINATION = "destination"
 CONF_OPCODE = "opcode"
 CONF_DATA = "data"
-CONF_PARENT = "parent"
+CONF_PARENT = "cec_id"
 
 def validate_data_array(value):
     if isinstance(value, list):
@@ -54,6 +54,7 @@ SendAction = hdmi_cec_ns.class_(
     "SendAction", automation.Action
 )
 
+MULTI_CONF = True
 CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(HDMICEC),
