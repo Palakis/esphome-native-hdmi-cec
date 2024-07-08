@@ -1,4 +1,4 @@
-name: Close stale issues
+name: Handle stale issues and PRs
 
 on:
   schedule:
