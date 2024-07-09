@@ -1,0 +1,72 @@
+name: Report an issue with esphome-native-hdmi-cec
+description: Create a report to help esphome-native-hdmi-cec improve.
+title: "[Bug]: "
+labels: ["bug", "needs triage"]
+body:
+  - type: textarea
+    validations:
+      required: true
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        Describe the issue you are experiencing here to communicate to the
+        maintainer(s). Tell us what you were trying to do and what happened.
+
+        Provide a clear and concise description of what the problem is.
+  - type: markdown
+    attributes:
+      value: |
+        ## Environment
+  - type: input
+    id: version
+    validations:
+      required: true
+    attributes:
+      label: Which version of ESPHome was used when this happened?
+      description: >
+        ESPHome version like 1.19, 2021.9.0 or 2021.XX.X-dev.
+  - type: dropdown
+    validations:
+      required: true
+    id: platform
+    attributes:
+      label: What platform are you using?
+      options:
+        - ESP8266
+        - ESP32
+        - ESP32-IDF
+        - RP2040
+        - BK72XX
+        - RTL87XX
+  - type: input
+    id: board
+    attributes:
+      label: Board
+      description: >
+        The name of the board you are using. For example, sonoff basic, nodemcu, shelly.
+  - type: markdown
+    attributes:
+      value: |
+        # Details
+  - type: textarea
+    id: config
+    attributes:
+      label: Example YAML snippet
+      description: |
+        If this issue has an example piece of YAML that can help reproducing this problem, please provide it here. Preferably reduce your config to the smallest possible file to reproduce the problem, or post the entire YAML. Posting a YAML fragment that cannot be compiled without changes will lessen the chance that your issue will be responded to promptly.
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything in the logs that might be useful?
+      description: For example, error message, or stack traces.
+      render: txt
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional information
+      description: >
+        If you have any additional information, use the field below.
+        Please note, you can attach screenshots or screen recordings here, by
+        dragging and dropping files in the field below.
