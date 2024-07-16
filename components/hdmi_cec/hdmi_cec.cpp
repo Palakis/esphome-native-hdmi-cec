@@ -1,5 +1,5 @@
 #include "hdmi_cec.h"
-#include "ddc_reader.h"
+#include "ddc_display.h"
 
 #include "esphome/core/log.h"
 
@@ -42,10 +42,7 @@ void HDMICEC::setup() {
   isr_pin_ = pin_->to_isr();
   recv_frame_buffer_.reserve(16); // max 16 bytes per CEC frame
 
-  if (ddc_i2c_bus_) {
-    auto ddc_reader = DDCReader(ddc_i2c_bus_);
-    // TODO probe DDC for physical address
-  }
+  try_read_physical_address();
 
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   switch_to_listen_mode_();
@@ -112,6 +109,13 @@ void HDMICEC::loop() {
     if (is_directly_addressed && !handled_by_trigger) {
       try_builtin_handler_(src_addr, dest_addr, data);
     }
+  }
+}
+
+void HDMICEC::try_read_physical_address() {
+  if (ddc_i2c_bus_) {
+    auto display = DDCDisplay(ddc_i2c_bus_);
+    // TODO probe DDC for physical address
   }
 }
 

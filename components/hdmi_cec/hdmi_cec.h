@@ -55,6 +55,7 @@ protected:
   bool send_and_read_ack_(bool is_broadcast);
   void switch_to_listen_mode_();
   void switch_to_send_mode_();
+  void try_read_physical_address();
 
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
