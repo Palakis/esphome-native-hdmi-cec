@@ -11,14 +11,14 @@ namespace hdmi_cec {
 
 using namespace i2c;
 
-class DDCReader : I2CDevice {
+class DDCDisplay : I2CDevice {
 public:
-  DDCReader(I2CBus *i2c_bus) : I2CDevice() {
+  DDCDisplay(I2CBus *i2c_bus) : I2CDevice() {
     set_i2c_bus(i2c_bus);
-    set_i2c_address(0x0); // TODO get the actual base address from the DDC spec
+    set_i2c_address(0x0); // TODO put EDID base address
   }
-protected:
-  I2CDevice prout_;
+
+  optional<uint16_t> read_physical_address();
 };
 
 }
