@@ -8,8 +8,6 @@ external_components:
 
 esp32:
   board: esp32dev
-  framework:
-    type: arduino
 
 # Enable logging
 logger:
@@ -26,9 +24,9 @@ api:
         cec_data: int[]
       then:
         - hdmi_cec.send:
-            source: !lambda 'return static_cast<unsigned char>(cec_source);'
-            destination: !lambda 'return static_cast<unsigned char>(cec_destination);'
-            data: !lambda 'std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;'
+            source: !lambda "return static_cast<unsigned char>(cec_source);"
+            destination: !lambda "return static_cast<unsigned char>(cec_destination);"
+            data: !lambda "std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;"
 
 # Enable OTA
 ota:
