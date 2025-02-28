@@ -20,6 +20,12 @@ enum class ReceiverState : uint8_t {
   WaitingForEOMAck = 5,
 };
 
+enum class SendResult : uint8_t {
+  Success = 0,
+  BusCollision = 1,
+  NoAck = 2,
+};
+
 class MessageTrigger;
 
 class HDMICEC : public Component {
@@ -45,10 +51,10 @@ protected:
   static void gpio_intr_(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
   void try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data);
-  bool send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast);
-  void send_start_bit_();
+  SendResult send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast);
+  bool send_start_bit_();
   void send_bit_(bool bit_value);
-  bool send_and_read_ack_(bool is_broadcast);
+  bool send_high_and_test_();
   void switch_to_listen_mode_();
   void switch_to_send_mode_();
 
