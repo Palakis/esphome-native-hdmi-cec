@@ -67,7 +67,8 @@ protected:
   std::vector<uint8_t> osd_name_bytes_;
   std::vector<MessageTrigger*> message_triggers_;
 
-  uint32_t last_falling_edge_us_;
+  uint32_t last_falling_edge_us_; // timepoint in received message
+  uint32_t last_sent_us_;         // timepoint on end of sent message
   ReceiverState receiver_state_;
   uint8_t recv_bit_counter_;
   uint8_t recv_byte_buffer_;

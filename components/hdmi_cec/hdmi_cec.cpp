@@ -204,14 +204,19 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
   {
     LockGuard send_lock(send_mutex_);
-    uint8_t free_bit_periods = 7;  // required bus free time between transmissions according to CEC standard
+    // Bus 'Signal Free' time between transmissions, according to the HDMI-CEC standard, shall be a minimum of:
+    //  - 7 bit periods between successive transmissions of same sender
+    //  - 5 bit periods between transmissions of different senders
+    //  - 3 bit periods for resend of a failed transmission attempt
+    uint8_t free_bit_periods = (last_sent_us_ > last_falling_edge_us_) ? 7 : 5;
 
     for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
       int32_t delay = 0;
-      while ((delay = free_bit_periods * TOTAL_BIT_US + last_falling_edge_us_ - micros()) > 0) {
+      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros()) > 0) {
         ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
         delay_microseconds_safe(delay);
-        // Note: during this delay, the 'last_falling_edge_us_' might be incremented by 'gpio_intr_'.
+        // Note: during this delay, the 'last_falling_edge_us_' might be incremented by 'gpio_intr_', requiring further wait
+        free_bit_periods = 5;
       }
       ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
 
@@ -273,8 +278,8 @@ SendResult IRAM_ATTR HDMICEC::send_frame_(const std::vector<uint8_t> &frame, boo
       break;
     }
   }
-  // capture last bus busy time also for bus writes (with interrupts off), not just for reads
-  last_falling_edge_us_ = micros();
+  // capture last bus busy time also for bus writes (with interrupts off)
+  last_sent_us_ = micros();
 
   switch_to_listen_mode_();
   return result;
