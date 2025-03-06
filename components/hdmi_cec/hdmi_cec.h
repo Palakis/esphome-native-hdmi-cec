@@ -60,7 +60,7 @@ protected:
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
   uint8_t address_;
-  uint16_t physical_address_;
+  optional<uint16_t> physical_address_;
   bool promiscuous_mode_;
   bool monitor_mode_;
   std::vector<uint8_t> osd_name_bytes_;

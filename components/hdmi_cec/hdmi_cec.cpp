@@ -1,5 +1,5 @@
 #include "hdmi_cec.h"
-#include "ddc_display.h"
+#include "ddc_sink.h"
 
 #include "esphome/core/log.h"
 
@@ -52,6 +52,12 @@ void HDMICEC::dump_config() {
   ESP_LOGCONFIG(TAG, "HDMI-CEC");
   LOG_PIN("  pin: ", pin_);
   ESP_LOGCONFIG(TAG, "  address: %x", address_);
+  if (physical_address_.has_value()) {
+    uint16_t value = physical_address_.value();
+    ESP_LOGCONFIG(TAG, "  physical address: %d.%d.%d.%d", (value >> 12) & 0xF, (value >> 8) & 0xF, (value >> 4) & 0xF, value & 0xF);
+  } else {
+    ESP_LOGCONFIG(TAG, "  physical address: none set or detected (defaulting to F.F.F.F)");
+  }
   ESP_LOGCONFIG(TAG, "  promiscuous mode: %s", (promiscuous_mode_ ? "yes" : "no"));
   ESP_LOGCONFIG(TAG, "  monitor mode: %s", (monitor_mode_ ? "yes" : "no"));
   if (ddc_i2c_bus_) {
@@ -113,10 +119,18 @@ void HDMICEC::loop() {
 }
 
 void HDMICEC::try_read_physical_address() {
-  if (ddc_i2c_bus_) {
-    auto display = DDCDisplay(ddc_i2c_bus_);
-    // TODO probe DDC for physical address
+  if (physical_address_.has_value() || !ddc_i2c_bus_) {
+    return;
   }
+
+  auto display = ddc::Sink(ddc_i2c_bus_);
+  auto result = display.read_physical_address();
+  if (!result.has_value()) {
+    ESP_LOGW(TAG, "failed to read physical address from DDC display");
+    return;
+  }
+
+  physical_address_ = result.value();
 }
 
 uint8_t logical_address_to_device_type(uint8_t logical_address) {
@@ -185,7 +199,7 @@ void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const st
     // "Give Physical Address" request
     case 0x83: {
       // reply with "Report Physical Address" (0x84)
-      auto physical_address_bytes = decode_value(physical_address_);
+      auto physical_address_bytes = decode_value(physical_address_.value_or(0xFFFF));
       std::vector<uint8_t> data = { 0x84 };
       data.insert(data.end(), physical_address_bytes.begin(), physical_address_bytes.end());
       // Device Type
