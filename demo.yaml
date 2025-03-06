@@ -30,7 +30,8 @@ api:
 
 # Enable OTA
 ota:
-  password: !secret mgmt_pass
+  - platform: esphome
+    password: !secret mgmt_pass
 
 wifi:
   ssid: !secret wifi_ssid
