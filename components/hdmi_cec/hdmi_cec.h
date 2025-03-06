@@ -30,6 +30,7 @@ public:
   void set_pin(InternalGPIOPin *pin) { pin_ = pin; }
   void set_address(uint8_t address) { address_ = address; }
   uint8_t address() { return address_; }
+  void set_hpd_pin(InternalGPIOPin *hpd_pin) { hpd_pin_ = hpd_pin; }
   void set_physical_address(uint16_t physical_address) { physical_address_ = physical_address; }
   void set_promiscuous_mode(bool promiscuous_mode) { promiscuous_mode_ = promiscuous_mode; }
   void set_monitor_mode(bool monitor_mode) { monitor_mode_ = monitor_mode; }
@@ -46,8 +47,9 @@ public:
   void loop() override;
 
 protected:
-  static void gpio_intr_(HDMICEC *self);
+  static void cec_gpio_intr_(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
+  static void IRAM_ATTR HDMICEC::hpd_gpio_intr_(HDMICEC *self);
   void try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data);
   bool send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast);
   void send_start_bit_();
@@ -60,6 +62,7 @@ protected:
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
   uint8_t address_;
+  InternalGPIOPin *hpd_pin_;
   optional<uint16_t> physical_address_;
   bool promiscuous_mode_;
   bool monitor_mode_;
@@ -74,6 +77,7 @@ protected:
   std::vector<uint8_t> recv_frame_buffer_;
   std::queue<std::vector<uint8_t>> recv_queue_;
   bool recv_ack_queued_;
+  bool physical_address_read_queued_;
   Mutex send_mutex_;
 };
 

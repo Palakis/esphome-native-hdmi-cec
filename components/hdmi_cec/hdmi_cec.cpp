@@ -38,14 +38,21 @@ std::string bytes_to_string(std::vector<uint8_t> bytes) {
 }
 
 void HDMICEC::setup() {
-  this->pin_->setup();  
+  pin_->setup();
   isr_pin_ = pin_->to_isr();
   recv_frame_buffer_.reserve(16); // max 16 bytes per CEC frame
 
-  try_read_physical_address();
-
-  pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
+  pin_->attach_interrupt(HDMICEC::cec_gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   switch_to_listen_mode_();
+
+  if (hpd_pin_) {
+    hpd_pin_->setup();
+    hpd_pin_->attach_interrupt(HDMICEC::hpd_gpio_intr_, this, gpio::INTERRUPT_RISING_EDGE);
+  }
+
+  if (hpd_pin_ && hpd_pin_->digital_read() == true) {
+    try_read_physical_address();
+  }
 }
 
 void HDMICEC::dump_config() {
@@ -69,6 +76,11 @@ void HDMICEC::dump_config() {
 
 void HDMICEC::loop() {
   while(!recv_queue_.empty()) {
+    if (physical_address_read_queued_) {
+      physical_address_read_queued_ = false;
+      try_read_physical_address();
+    }
+
     auto frame = recv_queue_.front();
     recv_queue_.pop();
 
@@ -366,7 +378,7 @@ void IRAM_ATTR HDMICEC::switch_to_send_mode_() {
   pin_->digital_write(true);
 }
 
-void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
+void IRAM_ATTR HDMICEC::cec_gpio_intr_(HDMICEC *self) {
   const uint32_t now = micros();
   const bool level = self->isr_pin_.digital_read();
 
@@ -465,6 +477,10 @@ void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_byte_buffer_ = 0x0;
   self->recv_frame_buffer_.clear();
   self->recv_frame_buffer_.reserve(16);
+}
+
+void IRAM_ATTR HDMICEC::hpd_gpio_intr_(HDMICEC *self) {
+  self->physical_address_read_queued_ = true;
 }
 
 }

@@ -11,6 +11,7 @@ CODEOWNERS = ["@Palakis"]
 
 # Component settings
 CONF_PIN = "pin"
+CONF_HPD_PIN = "hpd_pin"
 CONF_ADDRESS = "address"
 CONF_PHYSICAL_ADDRESS = "physical_address"
 CONF_DDC_I2C_ID = "ddc_i2c_id"
@@ -63,6 +64,7 @@ CONFIG_SCHEMA = (
             cv.GenerateID(): cv.declare_id(HDMICEC),
             cv.Required(CONF_PIN): pins.internal_gpio_output_pin_schema,
             cv.Required(CONF_ADDRESS): cv.int_range(min=0, max=15),
+            cv.Optional(CONF_HPD_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_PHYSICAL_ADDRESS): cv.uint16_t,
             cv.Optional(CONF_PROMISCUOUS_MODE, False): cv.boolean,
             cv.Optional(CONF_MONITOR_MODE, False): cv.boolean,
@@ -85,10 +87,19 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    cec_pin_ = await cg.gpio_pin_expression(config[CONF_PIN])
-    cg.add(var.set_pin(cec_pin_))
+    cec_pin = await cg.gpio_pin_expression(config[CONF_PIN])
+    cg.add(var.set_pin(cec_pin))
 
     cg.add(var.set_address(config[CONF_ADDRESS]))
+
+    hpd_pin = await cg.gpio_pin_expression(config.get(CONF_HPD_PIN))
+    if hpd_pin is not None:
+        cg.add(var.set_hpd_pin(hpd_pin))
+
+    physical_address = config.get(CONF_PHYSICAL_ADDRESS)
+    if physical_address is not None:
+        cg.add(var.set_physical_address(physical_address))
+
     cg.add(var.set_promiscuous_mode(config[CONF_PROMISCUOUS_MODE]))
     cg.add(var.set_monitor_mode(config[CONF_MONITOR_MODE]))
 
@@ -96,9 +107,6 @@ async def to_code(config):
     osd_name_bytes = [x for x in osd_name_bytes] # convert byte array to int array
     osd_name_bytes = cg.std_vector.template(cg.uint8)(osd_name_bytes)
     cg.add(var.set_osd_name_bytes(osd_name_bytes))
-
-    if CONF_PHYSICAL_ADDRESS in config:
-        cg.add(var.set_physical_address(config[CONF_PHYSICAL_ADDRESS]))
 
     ddc_i2c_id_ = config.get(CONF_DDC_I2C_ID)
     if ddc_i2c_id_ is not None:
