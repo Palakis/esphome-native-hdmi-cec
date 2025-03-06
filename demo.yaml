@@ -50,6 +50,7 @@ i2c:
 
 hdmi_cec:
   pin: GPIO26
+  hpd_pin: GPIO27
   address: 0x5
   physical_address: 0x4000
   ddc_i2c_id: ddc

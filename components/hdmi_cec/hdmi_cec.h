@@ -49,7 +49,7 @@ public:
 protected:
   static void cec_gpio_intr_(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
-  static void IRAM_ATTR HDMICEC::hpd_gpio_intr_(HDMICEC *self);
+  static void hpd_gpio_intr_(HDMICEC *self);
   void try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data);
   bool send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast);
   void send_start_bit_();
@@ -63,6 +63,7 @@ protected:
   ISRInternalGPIOPin isr_pin_;
   uint8_t address_;
   InternalGPIOPin *hpd_pin_;
+  ISRInternalGPIOPin hpd_isr_pin_;
   optional<uint16_t> physical_address_;
   bool promiscuous_mode_;
   bool monitor_mode_;

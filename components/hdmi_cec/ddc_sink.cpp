@@ -25,7 +25,7 @@ optional<uint16_t> Sink::read_physical_address() {
     ESP_LOGW(TAG, "Invalid EDID header");
   }
 
-  // check if the base EDID block is valid
+  // check if the base EDID block is valid 
   if (validate_edid_block_(edid, sizeof(edid)) == false) {
     ESP_LOGW(TAG, "EDID base block checksum error. Potentially invalid EDID");
   }
@@ -34,21 +34,21 @@ optional<uint16_t> Sink::read_physical_address() {
   uint8_t edid_revision = edid[0x13];
   ESP_LOGD(TAG, "EDID version: %d.%d", edid_version, edid_revision);
 
-  // // check if EDID has an extension block
-  // if (edid[0x7E] == 0x00) {
-  //   ESP_LOGW(TAG, "Cannot read physical address from DDC: no EDID extension blocks detected");
-  //   return optional<uint16_t>();
-  // }
+  // check if EDID has an extension block
+  if (edid[0x7E] == 0x00) {
+    ESP_LOGW(TAG, "Cannot read physical address from DDC: no EDID extension blocks detected");
+    return optional<uint16_t>();
+  }
 
-  // // read the first extension block
-  // uint8_t ext_block[128];
-  // read_register(0x80, ext_block, sizeof(ext_block));
+  // read the first extension block
+  uint8_t ext_block[128];
+  read_register(0x80, ext_block, sizeof(ext_block));
 
-  // // check if the extension block is a valid CEA-861 block
-  // if (ext_block[0] != 0x02) {
-  //   ESP_LOGW(TAG, "Cannot read physical address from DDC: invalid first EDID extension block (not CEA-861 compliant)");
-  //   return optional<uint16_t>();
-  // }
+  // check if the extension block is a valid CEA-861 block
+  if (ext_block[0] != 0x02) {
+    ESP_LOGW(TAG, "Cannot read physical address from DDC: invalid first EDID extension block (not CEA-861 compliant)");
+    return optional<uint16_t>();
+  }
 
   return optional<uint16_t>();
 }

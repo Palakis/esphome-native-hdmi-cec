@@ -47,7 +47,8 @@ void HDMICEC::setup() {
 
   if (hpd_pin_) {
     hpd_pin_->setup();
-    hpd_pin_->attach_interrupt(HDMICEC::hpd_gpio_intr_, this, gpio::INTERRUPT_RISING_EDGE);
+    hpd_isr_pin_ = hpd_pin_->to_isr();
+    hpd_pin_->attach_interrupt(HDMICEC::hpd_gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   }
 
   if (hpd_pin_ && hpd_pin_->digital_read() == true) {
@@ -480,7 +481,13 @@ void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
 }
 
 void IRAM_ATTR HDMICEC::hpd_gpio_intr_(HDMICEC *self) {
-  self->physical_address_read_queued_ = true;
+  const bool level = self->isr_pin_.digital_read();
+  if (level == true) {
+    self->physical_address_read_queued_ = true;
+  } else {
+    self->physical_address_read_queued_ = false;
+    self->physical_address_.reset();
+  }
 }
 
 }
