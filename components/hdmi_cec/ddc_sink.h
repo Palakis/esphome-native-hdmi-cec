@@ -22,8 +22,8 @@ public:
 
 protected:
   void set_segment_pointer_(uint8_t segment_pointer, bool stop = false);
-  bool validate_edid_header_(const uint8_t *data, size_t max_len);
-  bool validate_edid_block_(const uint8_t *data, size_t len);
+  bool validate_edid_header_(std::vector<uint8_t> &data);
+  bool validate_edid_block_(std::vector<uint8_t> &data);
 };
 
 }
