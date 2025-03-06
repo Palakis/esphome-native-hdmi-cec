@@ -79,7 +79,14 @@ void HDMICEC::loop() {
   while(!recv_queue_.empty()) {
     if (physical_address_read_queued_) {
       physical_address_read_queued_ = false;
+      ESP_LOGD(TAG, "HPD signal detected. Reading physical address...");
       try_read_physical_address();
+      if (physical_address_.has_value()) {
+        uint16_t value = physical_address_.value();
+        ESP_LOGI(TAG, "Physical address: %d.%d.%d.%d", (value >> 12) & 0xF, (value >> 8) & 0xF, (value >> 4) & 0xF, value & 0xF);
+      } else {
+        ESP_LOGI(TAG, "Physical address: none set or detected (defaulting to F.F.F.F)");
+      }
     }
 
     auto frame = recv_queue_.front();
