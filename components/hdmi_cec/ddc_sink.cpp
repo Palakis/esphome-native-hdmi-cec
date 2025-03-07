@@ -85,10 +85,10 @@ optional<uint16_t> Sink::read_physical_address() {
         return optional<uint16_t>();
       }
 
-      uint32_t ieee_id = (cea_data_block[i + 1] << 16) | (cea_data_block[i + 2] << 8) | cea_data_block[i + 3];
+      uint32_t ieee_id = cea_data_block[i + 1] | (cea_data_block[i + 2] << 8) | (cea_data_block[i + 3] << 16);
       if (ieee_id == 0x000C03) {
         // it's a HDMI Vendor-Specific Data Block
-        uint8_t physical_address = cea_data_block[i + 4] << 8 | cea_data_block[i + 5];
+        uint16_t physical_address = cea_data_block[i + 4] << 8 | cea_data_block[i + 5];
         return optional<uint16_t>(physical_address);
       }
     }
