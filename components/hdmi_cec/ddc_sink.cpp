@@ -16,28 +16,30 @@ optional<uint16_t> Sink::read_physical_address() {
 
   set_i2c_address(DDC_EDID_ADDRESS);
 
-  // read base EDID block
-  std::vector<uint8_t> edid(128);
-  read_register(0x00, edid.data(), edid.size());
+  {
+    // read base EDID block
+    std::vector<uint8_t> edid(128);
+    read_register(0x00, edid.data(), edid.size());
 
-  // check if the header of the base EDID block is valid
-  if (validate_edid_header_(edid) == false) {
-    ESP_LOGW(TAG, "Invalid EDID header");
-  }
+    // check if the header of the base EDID block is valid
+    if (validate_edid_header_(edid) == false) {
+      ESP_LOGW(TAG, "Invalid EDID header");
+    }
 
-  // validate the base EDID block
-  if (validate_edid_block_(edid) == false) {
-    ESP_LOGW(TAG, "EDID base block checksum error. Potentially invalid EDID");
-  }
+    // validate the base EDID block
+    if (validate_edid_block_(edid) == false) {
+      ESP_LOGW(TAG, "EDID base block checksum error. Potentially invalid EDID");
+    }
 
-  uint8_t edid_version = edid[0x12];
-  uint8_t edid_revision = edid[0x13];
-  ESP_LOGD(TAG, "EDID version: %d.%d", edid_version, edid_revision);
+    uint8_t edid_version = edid[0x12];
+    uint8_t edid_revision = edid[0x13];
+    ESP_LOGD(TAG, "EDID version: %d.%d", edid_version, edid_revision);
 
-  // check if EDID has an extension block
-  if (edid[0x7E] == 0x00) {
-    ESP_LOGW(TAG, "Cannot read physical address from DDC: no EDID extension blocks detected");
-    return optional<uint16_t>();
+    // check if EDID has an extension block
+    if (edid[0x7E] == 0x00) {
+      ESP_LOGW(TAG, "Cannot read physical address from DDC: no EDID extension blocks detected");
+      return optional<uint16_t>();
+    }
   }
 
   // read the first extension block
