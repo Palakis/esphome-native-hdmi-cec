@@ -8,7 +8,7 @@ namespace ddc {
 
 static const char *const TAG = "hdmi_cec::ddc";
 static const uint8_t DDC_EDID_ADDRESS = 0x50;
-static const uint8_t DDC_SEGMENT_POINTER_ADDRESS = 0x00;
+static const uint8_t DDC_SEGMENT_POINTER_ADDRESS = 0x60;
 
 optional<uint16_t> Sink::read_physical_address() {
   // reset segment pointer
