@@ -15,11 +15,10 @@ static const uint32_t TOTAL_BIT_US = 2400;
 static const uint32_t HIGH_BIT_US = 600;
 static const uint32_t LOW_BIT_US = 1500;
 // arbitration and retransmission
-static const uint32_t MIN_SIGNAL_FREE_TIME = (TOTAL_BIT_US * 7);
 static const size_t MAX_ATTEMPTS = 5;
 
 static const gpio::Flags INPUT_MODE_FLAGS = gpio::FLAG_INPUT | gpio::FLAG_PULLUP;
-static const gpio::Flags OUTPUT_MODE_FLAGS = gpio::FLAG_OUTPUT;
+static const gpio::Flags OUTPUT_MODE_FLAGS = gpio::FLAG_OUTPUT | gpio::FLAG_OPEN_DRAIN | gpio::FLAG_PULLUP;
 
 std::string bytes_to_string(std::vector<uint8_t> bytes) {
   std::string result;
@@ -200,33 +199,36 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   uint8_t header = (((source & 0x0F) << 4) | (destination & 0x0F));
   std::vector<uint8_t> frame = { header };
   frame.insert(frame.end(), data_bytes.begin(), data_bytes.end());
-
   std::string bytes_to_send = bytes_to_string(frame);
   ESP_LOGD(TAG, "sending frame: %s", bytes_to_send.c_str());
 
   {
     LockGuard send_lock(send_mutex_);
+    // Bus 'Signal Free' time between transmissions, according to the HDMI-CEC standard, shall be a minimum of:
+    //  - 7 bit periods between successive transmissions of same sender
+    //  - 5 bit periods between transmissions of different senders
+    //  - 3 bit periods for resend of a failed transmission attempt
+    uint8_t free_bit_periods = (last_sent_us_ > last_falling_edge_us_) ? 7 : 5;
 
     for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
-      ESP_LOGV(TAG, "HDMICEC::send(): waiting for the bus to be free...");
-      while((micros() - last_falling_edge_us_) < MIN_SIGNAL_FREE_TIME) {
-        delay_microseconds_safe(TOTAL_BIT_US); // wait for one bit period
+      int32_t delay = 0;
+      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros()) > 0) {
+        ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
+        delay_microseconds_safe(delay);
+        // Note: during this delay, the 'last_falling_edge_us_' might be incremented by 'gpio_intr_', requiring further wait
+        free_bit_periods = 5;
       }
       ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
 
-      bool success = send_frame_(frame, is_broadcast);
-      if (success) {
+      auto result = send_frame_(frame, is_broadcast);
+      if (result == SendResult::Success) {
         ESP_LOGD(TAG, "HDMICEC::send(): frame sent and acknowledged");
         return true;
-      } else {
-        if (is_broadcast) {
-          ESP_LOGW(TAG, "HDMICEC::send(): negative ack received. retrying...");
-        } else {
-          ESP_LOGW(TAG, "HDMICEC::send(): no ack received. retrying...");
-        }
       }
-
-      delay_microseconds_safe(TOTAL_BIT_US);
+      ESP_LOGD(TAG, "HDMICEC::send(): frame not sent: %s",
+               ((result == SendResult::BusCollision) ? "Bus Collision" : "No Ack received"));
+      // attempt retransmission with smaller free time gap
+      free_bit_periods = 3;
     }
   }
 
@@ -234,52 +236,77 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   return false;
 }
 
-bool IRAM_ATTR HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) {
+SendResult IRAM_ATTR HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) {
   InterruptLock interrupt_lock;
+  auto result = SendResult::Success;
 
   switch_to_send_mode_();
+  bool success = send_start_bit_();
 
-  send_start_bit_();
-  
   // for each byte of the frame:
-  bool success = true;
   for (auto it = frame.begin(); it != frame.end(); ++it) {
     uint8_t current_byte = *it;
 
     // 1. send the current byte
-    for (int8_t i = 7; i >= 0; i--) {
+    for (int8_t i = 7; (i >= 0) && success; i--) {
       bool bit_value = ((current_byte >> i) & 0b1);
-      send_bit_(bit_value);
+      if ((it == frame.begin()) && i >= 4 && bit_value) {
+        // my initiator address bit is 1: test for bus collision
+        // see the specification in the HDMI standard, section "CEC Arbitration"
+        success = send_high_and_test_();
+      } else {
+        send_bit_(bit_value);
+      }
+    }
+
+    if (!success) {
+      // immediatly stop sending bits due to bus collision:
+      // the other concurrent initiator with lower address might not have detected the conflict
+      result = SendResult::BusCollision;
+      break;
     }
 
     // 2. send EOM bit (logic 1 if this is the last byte of the frame)
     bool is_eom = (it == (frame.end() - 1));
     send_bit_(is_eom);
 
-    // 3. send ack bit
-    bool ack_success = send_and_read_ack_(is_broadcast);
-    if (!ack_success) {
-      // return early if something went wrong
-      success = false;
+    // 3. send ack bit and test bit value from destination(s)
+    bool value = send_high_and_test_();
+    success = (value == is_broadcast);  // 'no broadcast' should give a 'false' signal value as 'ack'
+    if (!success) {
+      result = SendResult::NoAck;
       break;
     }
   }
+  // capture last bus busy time also for bus writes (with interrupts off)
+  last_sent_us_ = micros();
 
   switch_to_listen_mode_();
-
-  return success;
+  return result;
 }
 
-void IRAM_ATTR HDMICEC::send_start_bit_() {
+bool IRAM_ATTR HDMICEC::send_start_bit_() {
   // 1. pull low for 3700 us
   pin_->digital_write(false);
   delay_microseconds_safe(3700);
 
   // 2. pull high for 800 us
   pin_->digital_write(true);
-  delay_microseconds_safe(800);
+  delay_microseconds_safe(400);
+
+  // check half-way the 'high' interval for no collision
+  switch_to_listen_mode_();
+  bool value = pin_->digital_read();
+
+  // check at end of 'high' interval for no collision
+  delay_microseconds_safe(400);
+  value &= pin_->digital_read();
+  switch_to_send_mode_();
 
   // total duration of start bit: 4500 us
+  // No other initiator tried to 'start' concurrently by pulling the pin low?
+  bool success = (value == true);
+  return success;
 }
 
 void IRAM_ATTR HDMICEC::send_bit_(bool bit_value) {
@@ -296,35 +323,27 @@ void IRAM_ATTR HDMICEC::send_bit_(bool bit_value) {
   delay_microseconds_safe(high_duration_us);
 }
 
-bool IRAM_ATTR HDMICEC::send_and_read_ack_(bool is_broadcast) {
+bool IRAM_ATTR HDMICEC::send_high_and_test_() {
   uint32_t start_us = micros();
 
   // send a Logical 1
   pin_->digital_write(false);
   delay_microseconds_safe(HIGH_BIT_US);
   pin_->digital_write(true);
-
-  // switch to input mode...
-  pin_->pin_mode(INPUT_MODE_FLAGS);
+  switch_to_listen_mode_();
 
   // ...then wait up to the middle of the "Safe sample period" (CEC spec -> Signaling and Bit Timing -> Figure 5)
   static const uint32_t SAFE_SAMPLE_US = 1050;
   delay_microseconds_safe(SAFE_SAMPLE_US - (micros() - start_us));
   bool value = pin_->digital_read();
-
-  pin_->pin_mode(OUTPUT_MODE_FLAGS);
-  pin_->digital_write(true);
+  switch_to_send_mode_();
 
   // sleep for the rest of the bit period
   delay_microseconds_safe(TOTAL_BIT_US - (micros() - start_us));
 
-  // broadcast messages: line pulled low by any follower => something went wrong. no need to flip the value.
-  if (is_broadcast) {
-    return value;
-  }
-
-  // normal messages: line pulled low by the target follower => message ACKed successfully. we need to flip the value to match that logic.
-  return (!value);
+  // If a 'high' value was read, the 'low' pulse was short, not lengthened by another driver.
+  // Such short pulse represents a 'high' bit.
+  return value;
 }
 
 void IRAM_ATTR HDMICEC::switch_to_listen_mode_() {
