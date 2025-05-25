@@ -1,7 +1,6 @@
 #pragma once
 
 #include <vector>
-#include <queue>
 
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
@@ -10,7 +9,8 @@
 namespace esphome {
 namespace hdmi_cec {
 
-std::string bytes_to_string(std::vector<uint8_t> bytes);
+using Frame = std::vector<uint8_t>;
+std::string bytes_to_string(const Frame *bytes);
 
 enum class ReceiverState : uint8_t {
   Idle = 0,
@@ -58,6 +58,8 @@ protected:
   void switch_to_listen_mode_();
   void switch_to_send_mode_();
 
+  constexpr static int MAX_FRAME_LEN = 16;
+  constexpr static int MAX_FRAMES_QUEUED = 4;
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
   uint8_t address_;
@@ -67,14 +69,16 @@ protected:
   std::vector<uint8_t> osd_name_bytes_;
   std::vector<MessageTrigger*> message_triggers_;
 
-  uint32_t last_falling_edge_us_; // timepoint in received message
-  uint32_t last_sent_us_;         // timepoint on end of sent message
+  bool last_level_ = true;            // cec line level on last isr call
+  uint32_t last_falling_edge_us_ = 0; // timepoint in received message
+  uint32_t last_sent_us_ = 0;         // timepoint on end of sent message
   ReceiverState receiver_state_;
-  uint8_t recv_bit_counter_;
-  uint8_t recv_byte_buffer_;
-  std::vector<uint8_t> recv_frame_buffer_;
-  std::queue<std::vector<uint8_t>> recv_queue_;
-  bool recv_ack_queued_;
+  uint8_t recv_bit_counter_ = 0;
+  uint8_t recv_byte_buffer_ = 0;
+  Frame *frame_receive_ = nullptr;
+  std::vector<Frame *> frames_bucket_;  // preallocated empty Frames for re-use by receiver isr
+  std::vector<Frame *> frames_received_;  // Frames filled by receiver for handling, then recycled
+  bool recv_ack_queued_ = false;
   Mutex send_mutex_;
 };
 
