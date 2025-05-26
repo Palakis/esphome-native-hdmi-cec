@@ -17,7 +17,12 @@ static const uint32_t LOW_BIT_US = 1500;
 static const size_t MAX_ATTEMPTS = 5;
 
 static const gpio::Flags INPUT_MODE_FLAGS = gpio::FLAG_INPUT | gpio::FLAG_PULLUP;
-static const gpio::Flags OUTPUT_MODE_FLAGS = gpio::FLAG_OUTPUT | gpio::FLAG_OPEN_DRAIN | gpio::FLAG_PULLUP;
+static const gpio::Flags OUTPUT_MODE_FLAGS = gpio::FLAG_OUTPUT | gpio::FLAG_OPEN_DRAIN;
+// Note: the esp8266 does NOT support 'FLAG_OUTPUT | FLAG_OPEN_DRAIN | FLAG_PULLUP' as opposed to the esp32 and rp2040.
+// (see 'flags_to_mode' in its esphome gpio.cpp).
+// So, unfortunately, in 'OPEN_DRAIN' mode, the required 'PULLUP' cannot be activated.
+// Therefor, 'OUTPUT' will be used only to write '0': For writing a '1' the mode is switched to 'INPUT | PULLUP'.
+// That allows to safely check for cec bus conflicts on writing '1' (avoid short-circuit with other bus initiators).
 
 std::string bytes_to_string(const Frame *bytes) {
   std::string result;
@@ -34,6 +39,15 @@ std::string bytes_to_string(const Frame *bytes) {
   return result;
 }
 
+inline void IRAM_ATTR HDMICEC::set_pin_input_high() {
+  pin_->pin_mode(INPUT_MODE_FLAGS);
+}
+
+inline void IRAM_ATTR HDMICEC::set_pin_output_low() {
+  pin_->pin_mode(OUTPUT_MODE_FLAGS);
+  pin_->digital_write(false);
+}
+
 void HDMICEC::setup() {
   this->pin_->setup();  
   isr_pin_ = pin_->to_isr();
@@ -48,7 +62,7 @@ void HDMICEC::setup() {
   frames_received_.clear();
   frames_received_.reserve(MAX_FRAMES_QUEUED);
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
-  switch_to_listen_mode_();
+  set_pin_input_high();
 }
 
 void HDMICEC::dump_config() {
@@ -257,7 +271,6 @@ SendResult IRAM_ATTR HDMICEC::send_frame_(const std::vector<uint8_t> &frame, boo
   pin_->detach_interrupt();  // do NOT listen for pin changes while sending
   auto result = SendResult::Success;
 
-  switch_to_send_mode_();
   bool success = send_start_bit_();
 
   // for each byte of the frame:
@@ -298,27 +311,24 @@ SendResult IRAM_ATTR HDMICEC::send_frame_(const std::vector<uint8_t> &frame, boo
   // capture last bus busy time also for bus writes (with interrupts off)
   last_sent_us_ = micros();
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
-  switch_to_listen_mode_();
   return result;
 }
 
 bool IRAM_ATTR HDMICEC::send_start_bit_() {
   // 1. pull low for 3700 us
-  pin_->digital_write(false);
+  set_pin_output_low();
   delay_microseconds_safe(3700);
 
   // 2. pull high for 800 us
-  pin_->digital_write(true);
+  set_pin_input_high();
   delay_microseconds_safe(400);
 
   // check half-way the 'high' interval for no collision
-  switch_to_listen_mode_();
   bool value = pin_->digital_read();
 
   // check at end of 'high' interval for no collision
   delay_microseconds_safe(400);
   value &= pin_->digital_read();
-  switch_to_send_mode_();
 
   // total duration of start bit: 4500 us
   // No other initiator tried to 'start' concurrently by pulling the pin low?
@@ -334,9 +344,9 @@ void IRAM_ATTR HDMICEC::send_bit_(bool bit_value) {
   const uint32_t low_duration_us = (bit_value ? HIGH_BIT_US : LOW_BIT_US);
   const uint32_t high_duration_us = (TOTAL_BIT_US - low_duration_us);
 
-  pin_->digital_write(false);
+  set_pin_output_low();
   delay_microseconds_safe(low_duration_us);
-  pin_->digital_write(true);
+  set_pin_input_high();
   delay_microseconds_safe(high_duration_us);
 }
 
@@ -344,16 +354,14 @@ bool IRAM_ATTR HDMICEC::send_high_and_test_() {
   uint32_t start_us = micros();
 
   // send a Logical 1
-  pin_->digital_write(false);
+  set_pin_output_low();
   delay_microseconds_safe(HIGH_BIT_US);
-  pin_->digital_write(true);
-  switch_to_listen_mode_();
+  set_pin_input_high();
 
   // ...then wait up to the middle of the "Safe sample period" (CEC spec -> Signaling and Bit Timing -> Figure 5)
   static const uint32_t SAFE_SAMPLE_US = 1050;
   delay_microseconds_safe(SAFE_SAMPLE_US - (micros() - start_us));
   bool value = pin_->digital_read();
-  switch_to_send_mode_();
 
   // sleep for the rest of the bit period
   delay_microseconds_safe(TOTAL_BIT_US - (micros() - start_us));
@@ -361,15 +369,6 @@ bool IRAM_ATTR HDMICEC::send_high_and_test_() {
   // If a 'high' value was read, the 'low' pulse was short, not lengthened by another driver.
   // Such short pulse represents a 'high' bit.
   return value;
-}
-
-void IRAM_ATTR HDMICEC::switch_to_listen_mode_() {
-  pin_->pin_mode(INPUT_MODE_FLAGS);
-}
-
-void IRAM_ATTR HDMICEC::switch_to_send_mode_() {
-  pin_->pin_mode(OUTPUT_MODE_FLAGS);
-  pin_->digital_write(true);
 }
 
 void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
@@ -390,11 +389,9 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
       self->recv_ack_queued_ = false;
       {
         InterruptLock interrupt_lock;
-        self->isr_pin_.pin_mode(OUTPUT_MODE_FLAGS);
-        self->isr_pin_.digital_write(false);
+        self->set_pin_output_low();
         delay_microseconds_safe(LOW_BIT_US);
-        self->isr_pin_.digital_write(true);
-        self->isr_pin_.pin_mode(INPUT_MODE_FLAGS);
+        self->set_pin_input_high();
       }
     }
     return;

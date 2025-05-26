@@ -55,8 +55,8 @@ protected:
   bool send_start_bit_();
   void send_bit_(bool bit_value);
   bool send_high_and_test_();
-  void switch_to_listen_mode_();
-  void switch_to_send_mode_();
+  void set_pin_input_high();
+  void set_pin_output_low();
 
   constexpr static int MAX_FRAME_LEN = 16;
   constexpr static int MAX_FRAMES_QUEUED = 4;
