@@ -63,7 +63,6 @@ void HDMICEC::dump_config() {
   ESP_LOGCONFIG(TAG, "  address: %x", address_);
   ESP_LOGCONFIG(TAG, "  promiscuous mode: %s", (promiscuous_mode_ ? "yes" : "no"));
   ESP_LOGCONFIG(TAG, "  monitor mode: %s", (monitor_mode_ ? "yes" : "no"));
-  ESP_LOGCONFIG(TAG, "  log pings: %s", (log_pings_ ? "yes" : "no"));
 }
 
 void HDMICEC::loop() {
@@ -82,9 +81,7 @@ void HDMICEC::loop() {
 
     if (frame.size() == 1) {
       // don't process pings. they're already dealt with by the acknowledgement mechanism
-      if (log_pings_) {
-        ESP_LOGD(TAG, "ping received: 0x%01X -> 0x%01X", src_addr, dest_addr);
-      }
+      ESP_LOGV(TAG, "ping received: 0x%01X -> 0x%01X", src_addr, dest_addr);
       continue;
     }
 
