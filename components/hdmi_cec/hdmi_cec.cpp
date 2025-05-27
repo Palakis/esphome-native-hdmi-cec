@@ -239,7 +239,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
         ESP_LOGD(TAG, "HDMICEC::send(): frame sent and acknowledged");
         return true;
       }
-      ESP_LOGD(TAG, "HDMICEC::send(): frame not sent: %s",
+      ESP_LOGI(TAG, "HDMICEC::send(): frame not sent: %s",
                ((result == SendResult::BusCollision) ? "Bus Collision" : "No Ack received"));
       // attempt retransmission with smaller free time gap
       free_bit_periods = 3;
