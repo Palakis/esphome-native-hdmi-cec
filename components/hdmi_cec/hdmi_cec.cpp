@@ -94,7 +94,7 @@ void HDMICEC::loop() {
 
     if (frame->size() == 1) {
       // don't process pings. they're already dealt with by the acknowledgement mechanism
-      ESP_LOGD(TAG, "ping received: 0x%01X -> 0x%01X", src_addr, dest_addr);
+      ESP_LOGV(TAG, "ping received: 0x%01X -> 0x%01X", src_addr, dest_addr);
       frames_bucket_.push_back(frame);
       continue;
     }
@@ -256,7 +256,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
         ESP_LOGD(TAG, "HDMICEC::send(): frame sent and acknowledged");
         return true;
       }
-      ESP_LOGD(TAG, "HDMICEC::send(): frame not sent: %s",
+      ESP_LOGI(TAG, "HDMICEC::send(): frame not sent: %s",
                ((result == SendResult::BusCollision) ? "Bus Collision" : "No Ack received"));
       // attempt retransmission with smaller free time gap
       free_bit_periods = 3;
