@@ -109,7 +109,6 @@ protected:
   void set_pin_input_high();
   void set_pin_output_low();
 
-  constexpr static int MAX_FRAME_LEN = 16;
   constexpr static int MAX_FRAMES_QUEUED = 4;
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
@@ -127,7 +126,7 @@ protected:
   uint8_t recv_bit_counter_ = 0;
   uint8_t recv_byte_buffer_ = 0;
   Frame *frame_receive_ = nullptr;
-  FrameRingBuffer<4> frames_queue_;
+  FrameRingBuffer<MAX_FRAMES_QUEUED> frames_queue_;
   bool recv_ack_queued_ = false;
   Mutex send_mutex_;
 };
