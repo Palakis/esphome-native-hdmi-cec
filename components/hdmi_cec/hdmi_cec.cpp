@@ -359,7 +359,7 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
   const uint32_t now = micros();
   const bool level = self->isr_pin_.digital_read();
 
-  if ((level && self->last_falling_edge_us_ == 0) || level == self->last_level_) {
+  if (level == self->last_level_) {
     // spurious interrupt, probably resulting from a pin mode change
     return;
   }
@@ -396,7 +396,7 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
     // short glitch on the line: ignore
     return;
   }
-  
+
   bool value = (pulse_duration >= HIGH_BIT_MIN_US && pulse_duration <= HIGH_BIT_MAX_US);
   
   switch (self->receiver_state_) {
