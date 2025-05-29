@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <vector>
+#include <atomic>
 
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
@@ -10,6 +12,7 @@ namespace esphome {
 namespace hdmi_cec {
 
 using Frame = std::vector<uint8_t>;
+constexpr static int MAX_FRAME_SIZE = 16;  // according to hdmi cec standard
 std::string bytes_to_string(const Frame *bytes);
 
 enum class ReceiverState : uint8_t {
@@ -24,6 +27,54 @@ enum class SendResult : uint8_t {
   Success = 0,
   BusCollision = 1,
   NoAck = 2,
+};
+
+/*
+* The FrameRingBuffer is a container for Frames to queue data in a consumer-producer
+* application. The use of std::Atomics allows safe multi-thread operation when used with
+* a single producer and single consumer thread, where each Atomic index is updated
+* by one thread only.
+* After initialization, it operates without dynamic memmory allocation.
+* This allows the gpio isr to safely and efficiently pick-up and pass Frames.
+* Due to its fixed memory size, it might return NULL pointers in case the buffer is full or empty.
+*/
+template <unsigned int SIZE>
+class FrameRingBuffer {
+  public:
+  FrameRingBuffer()
+  : front_inx_{0}
+  , back_inx_{0}
+  , store_{} {
+    for (auto& t : store_) {
+      t = new Frame;
+      t->reserve(MAX_FRAME_SIZE);
+    }
+  }
+  ~FrameRingBuffer() {
+    for (auto& t : store_) {
+      delete t;
+    }
+  }
+  // 'front' is used to access data, use that, and recycle its memory space for later use.
+  Frame* front() const { return is_empty() ? nullptr : store_[front_inx_]; }
+  void push_front() { cyclic_incr(front_inx_); }
+  // 'back' is used to fetch a free Frame, fill with data, and queue for later pick-up
+  Frame* back() const { return is_full() ? nullptr : (store_[back_inx_]->clear(), store_[back_inx_]); }
+  void push_back() { cyclic_incr(back_inx_); }
+  bool is_empty() const {return count() == 0;}
+  bool is_full() const {return count() == SIZE;}  // using safe wrap-around of unsignd int
+  void reset() {front_inx_ = 0; back_inx_ = 0;}
+
+  protected:
+  using Index = std::atomic<unsigned int>;
+  // this simple increment scheme is sufficiently 'atomic' if the front and back are each used by
+  // one thread only. (So, at most one reader thread and one writer thread in the application.)
+  int count() const {int n = (int)(back_inx_ - front_inx_); if (n < 0) n += SIZE + 1; return n;}
+  void cyclic_incr(Index &inx) { inx = (inx == SIZE) ? 0 : (inx + 1); }
+  Index front_inx_;  // ranging 0 .. SIZE
+  Index back_inx_;   // ranging 0 .. SIZE
+  // if front_inx_ == back_inx_ the store is empty, so it can hold at most SIZE elements
+  std::array<Frame*, SIZE + 1> store_;
 };
 
 class MessageTrigger;
@@ -76,8 +127,7 @@ protected:
   uint8_t recv_bit_counter_ = 0;
   uint8_t recv_byte_buffer_ = 0;
   Frame *frame_receive_ = nullptr;
-  std::vector<Frame *> frames_bucket_;  // preallocated empty Frames for re-use by receiver isr
-  std::vector<Frame *> frames_received_;  // Frames filled by receiver for handling, then recycled
+  FrameRingBuffer<4> frames_queue_;
   bool recv_ack_queued_ = false;
   Mutex send_mutex_;
 };

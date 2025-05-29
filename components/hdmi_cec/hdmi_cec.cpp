@@ -51,16 +51,7 @@ inline void IRAM_ATTR HDMICEC::set_pin_output_low() {
 void HDMICEC::setup() {
   this->pin_->setup();  
   isr_pin_ = pin_->to_isr();
-  // pre-allocate the frame buffers in which the isr can write its received frames
-  frames_bucket_.clear();
-  for (int i = 0; i < MAX_FRAMES_QUEUED; i++) {
-  // for (auto &fp: frames_bucket_) {
-    Frame *f = new Frame;
-    f->reserve(MAX_FRAME_LEN); // max 16 bytes per CEC frame
-    frames_bucket_.push_back(f);
-  }
-  frames_received_.clear();
-  frames_received_.reserve(MAX_FRAMES_QUEUED);
+  frames_queue_.reset();
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   set_pin_input_high();
 }
@@ -74,28 +65,21 @@ void HDMICEC::dump_config() {
 }
 
 void HDMICEC::loop() {
-  while (frames_received_.size() > 0) {
-    Frame *frame = frames_received_[0];  // process frames in fifo order
-    {
-      // remove picked frame from buffer, protect against simultaneous update by isr
-      InterruptLock interrupt_lock;
-      frames_received_.erase(frames_received_.begin());
-    }
-
+  while (const Frame *frame = frames_queue_.front()) {
     uint8_t header = frame->front();
     uint8_t src_addr = ((header & 0xF0) >> 4);
     uint8_t dest_addr = (header & 0x0F);
 
     if (!promiscuous_mode_ && (dest_addr != 0x0F) && (dest_addr != address_)) {
-      // ignore frames not meant for us
-      frames_bucket_.push_back(frame);
+      // ignore frames not meant for us, recycle frame buffer
+      frames_queue_.push_front();
       continue;
     }
 
     if (frame->size() == 1) {
       // don't process pings. they're already dealt with by the acknowledgement mechanism
       ESP_LOGV(TAG, "ping received: 0x%01X -> 0x%01X", src_addr, dest_addr);
-      frames_bucket_.push_back(frame);
+      frames_queue_.push_front();
       continue;
     }
 
@@ -105,7 +89,7 @@ void HDMICEC::loop() {
     std::vector<uint8_t> data(frame->begin() + 1, frame->end());
 
     // recycle received frame buffer
-    frames_bucket_.push_back(frame);
+    frames_queue_.push_front();
 
     // Process on_message triggers
     bool handled_by_trigger = false;
@@ -406,14 +390,7 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
     reset_state_variables_(self);
     self->recv_ack_queued_ = false;
     // pick frame receive buffer to fill, if available.
-    if (!self->frame_receive_ && self->frames_bucket_.size() > 0) {
-      self->frame_receive_ = self->frames_bucket_.back();
-      self->frames_bucket_.pop_back();
-    }
-    // if frame_receive_ is null, there is no frame storage: refrain from allocation in this isr.
-    if (self->frame_receive_) {
-      self->frame_receive_->clear();
-    }
+    self->frame_receive_ = self->frames_queue_.back();
     return;
   } else if (pulse_duration < (HIGH_BIT_MIN_US / 4)) {
     // short glitch on the line: ignore
@@ -455,7 +432,7 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
       if (isEOM) {
         // pass frame to app
         if (self->frame_receive_ && self->frame_receive_->size() > 0) {
-          self->frames_received_.push_back(self->frame_receive_);
+          self->frames_queue_.push_back();
           self->frame_receive_ = nullptr;
         }
         reset_state_variables_(self);
