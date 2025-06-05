@@ -81,15 +81,114 @@ hdmi_cec:
 
 4. (optional) Use the `hdmi_cec.send` action in your ESPHome configuration
 
-```yaml
+
+```
 button:
   - platform: template
-    name: "Turn everything off"
+    name: "Turn all HDMI devices off"
     on_press:
       hdmi_cec.send:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0xF # Broadcast
         data: [0x36] # "Standby" opcode
+  - platform: template
+    name: "Turn TV on"
+    on_press:
+      hdmi_cec.send:
+        source: 1 # can optionally be set, like if you want to spoof another device's address
+        destination: 0
+        data: [0x04]
+  - platform: template
+    name: "Turn TV off"
+    on_press:
+      hdmi_cec.send:
+        source: 1 # can optionally be set, like if you want to spoof another device's address
+        destination: 0
+        data: [0x36]
+  - platform: template
+    name: "Volume up"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 0x5
+        data: [0x44, 0x41]
+  - platform: template
+    name: "Volume down"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 0x5
+        data: [0x44, 0x42]
+  - platform: template
+    name: "Mute"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 0x5
+        data: [0x44, 0x43]
+  - platform: template
+    name: "Turn on Playback device 1"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 4
+        data: [0x44, 0x6D]
+  - platform: template
+    name: "Turn off Playback device 1"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 4
+        data: [0x36]
+  - platform: template
+    name: "Playback device 1 home button"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 4
+        data: [0x44, 0x09]
+  - platform: template
+    name: "Playback device 1 select/ok"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 4
+        data: [0x44, 0x00]
+  - platform: template
+    name: "Playback device 1 exit/back"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 4
+        data: [0x44, 0x0D]
+  - platform: template
+    name: "Playback device 1 play/pause"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 4
+        data: [0x44, 0x44]
+  - platform: template
+    name: "Turn on Playback device 2"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 8
+        data: [0x44, 0x6D]
+  - platform: template
+    name: "Turn off Playback device 2"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 8
+        data: [0x36]
+  - platform: template
+    name: "Playback device 2 play/pause"
+    on_press:
+      hdmi_cec.send:
+        # "source" can optionally be set, like if you want to spoof another device's address
+        destination: 8
+        data: [0x44, 0x46]
 ```
 
 5. (optional) Add Services for HomeAssistant
@@ -107,6 +206,218 @@ api
             destination: !lambda "return static_cast<unsigned char>(cec_destination);"
             data: !lambda "std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;"
 ```
+
+6. (optional) Send data via MQTT in CEC-o-matic format
+
+```
+mqtt:
+  broker: 'homeassistantaddress'
+  username: 'mqtt_user'
+  password: 'mqtt_password'
+  discovery: false # if you only want your own MQTT topics
+
+hdmi_cec:
+  pin: GPIO26
+  address: 0xE
+  physical_address: 0x4000
+  promiscuous_mode: true 
+  on_message:
+    # No source, destination or opcode set => catch all messages
+    - then:
+        mqtt.publish:
+          topic: cec_messages
+          payload: !lambda |-
+            std::vector<uint8_t> full_frame;
+            full_frame.push_back((source << 4) | (destination & 0xF));
+            full_frame.insert(full_frame.end(), data.begin(), data.end());
+            return hdmi_cec::bytes_to_string(full_frame);       
+```
+
+8. (optional) Add message decoder and text sensors
+
+```
+  on_message:
+  - then:
+      - lambda: |-
+          // — Build raw frame string —
+          std::vector<uint8_t> frame;
+          frame.push_back((source << 4) | (destination & 0xF));
+          frame.insert(frame.end(), data.begin(), data.end());
+          std::string raw = hdmi_cec::bytes_to_string(frame);
+          id(cec_raw_message).publish_state(raw);
+
+          // — Helper lambdas —
+          auto formatWithPeriods = [&](uint16_t num) {
+            std::string s = std::to_string(num), out;
+            for (char c : s) { out += c; out += '.'; }
+            if (!out.empty()) out.pop_back();
+            return out;
+          };
+          auto toHex = [&](uint8_t b) {
+            char buf[3]; sprintf(buf, "%02X", b);
+            return std::string(buf);
+          };
+          auto getDeviceName = [&](uint8_t nib) {
+            static const char* names[] = {
+              "TV","Recorder 1","Recorder 2","Tuner 1","Playback 1",
+              "Audio system","Tuner 2","Tuner 3","Playback 2","Recorder 3",
+              "Tuner 4","Playback 3","Reserved 1","Reserved 2","Free Use","Broadcast"
+            };
+            return std::string(names[nib & 0xF]);
+          };
+          // apply your custom names
+          auto applyCustom = [&](const std::string &n) {
+            if (n == "Playback 1")       return std::string("Apple TV");
+            if (n == "Playback 2")       return std::string("PlayStation");
+            if (n == "Audio system")     return std::string("Denon AVR");
+            return n;
+          };
+
+          // — Build device prefix —
+          uint8_t first = frame[0], src = first >> 4, dst = first & 0xF;
+          std::string dev_src = applyCustom(getDeviceName(src));
+          std::string dev_dst = applyCustom(getDeviceName(dst));
+          std::string prefix = dev_src
+            + (dst == 0xF
+                ? " broadcasting:"
+                : " to " + dev_dst + ":");
+
+          // — Parse opcode & args —
+          uint8_t opcode = frame.size()>1 ? frame[1] : 0x00;
+          uint8_t b2     = frame.size()>2 ? frame[2] : 0x00;
+          uint8_t b3     = frame.size()>3 ? frame[3] : 0x00;
+          uint16_t phys  = (b2 << 8) | b3;
+          int volume     = static_cast<int>(b2) - 2;
+          std::string action;
+
+          // — Full translation switch —
+          switch (opcode) {
+              case 0x0D:
+              case 0x04:
+                action = "I am the active source";
+                break;
+              case 0xA0:
+                action = "Routing information";
+                break;
+              case 0x1A:
+                action = std::string("My state is")
+                  + (b2 == 0x01 ? " (On)"
+                  : b2 == 0x02 ? " (Off)" : "");
+                break;
+              case 0x7A:
+                action = "Audio volume (" + std::to_string(volume) + ")";
+                break;
+              case 0x7D:
+                action = "Request audio mode status";
+                break;
+              case 0x7E:
+                action = std::string("Audio mode")
+                  + (b2 == 0x01 ? " (On)"
+                  : b2 == 0x00 ? " (Off)" : "");
+                break;
+              case 0x8C:
+                action = "Requesting vendor ID";
+                break;
+              case 0x8E:
+                action = "CEC routing control command";
+                break;
+              case 0x8F:
+                action = "Requesting power state";
+                break;
+              case 0x9D:
+                action = "Inactive source with physical address ("
+                  + formatWithPeriods(phys) + ")";
+                break;
+              case 0x9E:
+                action = "Reporting CEC version (not translated)";
+                break;
+              case 0x9F:
+                action = "Requesting CEC version";
+                break;
+              case 0x36:
+                action = "Standby";
+                break;
+              case 0x44:
+                action = "Button pressed"
+                  + (b2 == 0x00 ? " (Select)"
+                  : b2 == 0x01 ? " (Up)"
+                  : b2 == 0x02 ? " (Down)"
+                  : b2 == 0x03 ? " (Left)"
+                  : b2 == 0x04 ? " (Right)"
+                  : b2 == 0x41 ? " (Volume up)"
+                  : b2 == 0x42 ? " (Volume down)"
+                  : b2 == 0x46 ? " (Play/Pause)"
+                  : " (Unknown: " + toHex(b2) + toHex(b3) + ")");
+                break;
+              case 0x45:
+                action = "Button released";
+                break;
+              case 0x47:
+                action = "Set OSD display name (not translated)";
+                break;
+              case 0x70:
+                action = "Set active audio source ("
+                  + formatWithPeriods(phys) + ")";
+                break;
+              case 0x71:
+                action = "Requesting system audio mode";
+                break;
+              case 0x72:
+                action = std::string("Set system audio mode")
+                  + (b2 == 0x01 ? " (On)"
+                  : b2 == 0x00 ? " (Off)"
+                  : " (Unknown: " + toHex(b2) + ")");
+                break;
+              case 0x82:
+                action = "Set active source ("
+                  + formatWithPeriods(phys) + ")";
+                break;
+              case 0x83:
+                action = "What is your physical address?";
+                break;
+              case 0x84:
+                action = "My physical address is ("
+                  + formatWithPeriods(phys) + ")";
+                break;
+              case 0x85:
+                action = "Requesting active source";
+                break;
+              case 0x87:
+                action = "Reporting device vendor ID (not translated)";
+                break;
+              case 0x89:
+                action = "Vendor command (not translated)";
+                break;
+              case 0x90:
+                action = "Reporting power status"
+                  + (b2 == 0x00 ? " (Power On)"
+                  : b2 == 0x01 ? " (Standby)"
+                  : b2 == 0x02 ? " (In transition from Standby to On)"
+                  : b2 == 0x03 ? " (Power Off)"
+                  : " (Unknown: " + toHex(b2) + ")");
+                break;
+              default:
+                action = "Unknown action (0x" + toHex(opcode) + ")";
+                break;
+            }
+
+          // — Publish the human-readable translation —
+          std::string translated = prefix + " " + action;
+          id(cec_translated_message).publish_state(translated);
+
+
+text_sensor:
+  - platform: template
+    name: "HDMI CEC Raw Message"
+    id: cec_raw_message
+    update_interval: never
+
+  - platform: template
+    name: "HDMI CEC Translated Message"
+    id: cec_translated_message
+    update_interval: never
+```
+
 
 
 
