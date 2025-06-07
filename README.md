@@ -303,7 +303,7 @@ hdmi_cec:
   
   # Physical address of the device. In this case: 4.2.0.0 (The ESP32 is plugged into HDMI 2 on the receiver which is plugged into HDMI4 on the TV)
   # DDC support is not yet implemented, so you'll have to set this manually.
-  physical_address: 0x4000 # Required
+  physical_address: 0x4200 # Required
   
   # The name that will we displayed in the list of devices on your TV/receiver
   osd_name: "HDMI Bridge" # Optional. Defaults to "esphome"
