@@ -170,10 +170,10 @@ Under `mqtt:` and `hdmi_cec:`:
 
 ```yaml
 mqtt:
-  broker: 'your-mqtt-host.local'
-  username: 'user'
-  password: 'password'
-  discovery: false
+  broker: '192.168.1.100' # insert IP or DNS of your own MQTT broker (e.g. the IP of your HA server)
+  username: !secret mqtt_user # make sure your MQTT username is added to the secrets file in the ESPHome Add-on
+  password: !secret mqtt_password # make sure your MQTT password is added to the secrets file in the ESPHome Add-on
+  discovery: false # if you only want your own MQTT topics
 
 hdmi_cec:
   ...
@@ -327,6 +327,7 @@ hdmi_cec:
     - then:
         - mqtt.publish:
             topic: cec_messages
+            #Payload in CEC-O-Matic format
             payload: !lambda |-
               std::vector<uint8_t> frame;
               frame.push_back((source << 4) | (destination & 0xF));
