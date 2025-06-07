@@ -296,22 +296,22 @@ external_components:
 
 hdmi_cec:
   # Pick a GPIO pin that can do both input AND output
-  pin: GPIO26 # Required
+  pin: GPIO10 # Required
   
   # The address can be anything you want. Use 0xF if you only want to listen to the bus and not act like a standard device
   address: 0xE # Required
   
-  # Physical address of the device. In this case: 4.0.0.0 (HDMI4 on the TV)
+  # Physical address of the device. In this case: 4.2.0.0 (The ESP32 is plugged into HDMI 2 on the receiver which is plugged into HDMI4 on the TV)
   # DDC support is not yet implemented, so you'll have to set this manually.
   physical_address: 0x4000 # Required
   
   # The name that will we displayed in the list of devices on your TV/receiver
-  osd_name: "my device" # Optional. Defaults to "esphome"
+  osd_name: "HDMI Bridge" # Optional. Defaults to "esphome"
   
   # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
   # the address configured above) and broadcast messages. Enabling promiscuous mode will make the component
   # listen for all messages (both in logs and the on_message triggers)
-  promiscuous_mode: false # Optional. Defaults to false
+  promiscuous_mode: true # Optional. Defaults to false
   
   # By default, monitor mode is disabled, so the component can send messages and acknowledge incoming messages.
   # Enabling monitor mode lets the component act as a passive listener, disabling active manipulation of the CEC bus.
