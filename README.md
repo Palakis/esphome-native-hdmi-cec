@@ -28,7 +28,7 @@ Make your ESPHome devices speak the (machine) language of your living room with 
 
 Connect the microcontroller to an HDMI connector (HDMI connectors and breakout boards can be found on Amazon and AliExpress)
 
-| [HDMI Pin](https://en.wikipedia.org/wiki/HDMI) | Description    | Connect to microcontroller                           |
+| [HDMI Pin](https://en.wikipedia.org/wiki/HDMI) | Description    | Connect to microcontroller pin                           |
 | -------- | -------------- | ------------------------------------ |
 | 13       | CEC Data Line  | Any input/output GPIO (e.g., GPIO26) |
 | 17       | CEC Ground     | GND                                  |
