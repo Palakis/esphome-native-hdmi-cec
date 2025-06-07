@@ -147,7 +147,7 @@ button:
 
 ---
 
-### 🌐 3. Send CEC Commands via Home Assistant Services
+### 🌐 3. Enable CEC Commands via Home Assistant Services
 
 Under `api:`:
 
@@ -169,7 +169,7 @@ api:
 
 ---
 
-### ☁️ 4. Publish Messages over MQTT ([CEC-O-MATIC](https://www.cec-o-matic.com/) format)
+### ☁️ 4. Publish CEC Messages over MQTT ([CEC-O-MATIC](https://www.cec-o-matic.com/) format)
 
 Under `mqtt:` and `hdmi_cec:`:
 
