@@ -363,6 +363,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0xF # Broadcast
         data: [0x36] # "Standby" opcode
+
   - platform: template
     name: "Turn TV on"
     on_press:
@@ -370,6 +371,7 @@ button:
         source: 1 # can optionally be set, like if you want to spoof another device's address
         destination: 0
         data: [0x04]
+
   - platform: template
     name: "Turn TV off"
     on_press:
@@ -377,6 +379,7 @@ button:
         source: 1 # can optionally be set, like if you want to spoof another device's address
         destination: 0
         data: [0x36]
+
   - platform: template
     name: "Volume up"
     on_press:
@@ -384,6 +387,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0x5
         data: [0x44, 0x41]
+
   - platform: template
     name: "Volume down"
     on_press:
@@ -391,6 +395,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0x5
         data: [0x44, 0x42]
+
   - platform: template
     name: "Mute"
     on_press:
@@ -398,6 +403,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0x5
         data: [0x44, 0x43]
+
   - platform: template
     name: "Turn on Playback device 1"
     on_press:
@@ -405,6 +411,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
         data: [0x44, 0x6D]
+
   - platform: template
     name: "Turn off Playback device 1"
     on_press:
@@ -412,6 +419,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
         data: [0x36]
+
   - platform: template
     name: "Playback device 1 home button"
     on_press:
@@ -419,6 +427,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
         data: [0x44, 0x09]
+
   - platform: template
     name: "Playback device 1 select/ok"
     on_press:
@@ -426,6 +435,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
         data: [0x44, 0x00]
+
   - platform: template
     name: "Playback device 1 exit/back"
     on_press:
@@ -433,6 +443,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
         data: [0x44, 0x0D]
+
   - platform: template
     name: "Playback device 1 play/pause"
     on_press:
@@ -440,6 +451,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
         data: [0x44, 0x44]
+
   - platform: template
     name: "Turn on Playback device 2"
     on_press:
@@ -447,6 +459,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 8
         data: [0x44, 0x6D]
+
   - platform: template
     name: "Turn off Playback device 2"
     on_press:
@@ -454,6 +467,7 @@ button:
         # "source" can optionally be set, like if you want to spoof another device's address
         destination: 8
         data: [0x36]
+
   - platform: template
     name: "Playback device 2 play/pause"
     on_press:
