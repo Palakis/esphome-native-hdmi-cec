@@ -407,6 +407,7 @@ text_sensor:
     id: cec_translated_message
     update_interval: never
 ```
+> If MQTT is enabled, the text sensor values (raw and translated) will also be sent via MQTT
 
 ---
 
