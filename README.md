@@ -238,27 +238,23 @@ text_sensor:
 Here’s a full YAML snippet that includes all optional features together:
 
 ```yaml
-external_components:
-  - source: github://Palakis/esphome-hdmi-cec
-
 esphome:
-  name: hdmi_cec_bridge
-  platform: ESP32
+  name: hdmi-cec-bridge
+  friendly_name: HDMI CEC Bridge
+
+esp32:
   board: esp32-c3-devkitm-1
-  build:
+  framework:
     type: esp-idf
 
-wifi:
-  ssid: "..."
-  password: "..."
+# Enable logging
+logger:
 
-mqtt:
-  broker: 192.168.1.100
-  username: mqtt_user
-  password: mqtt_password
-  discovery: false
-
+# Enable Home Assistant API
 api:
+  encryption:
+    key: "..."
+  
   services:
     - service: hdmi_cec_send
       variables:
@@ -267,10 +263,31 @@ api:
       then:
         - hdmi_cec.send:
             destination: !lambda "return static_cast<unsigned char>(cec_destination);"
-            data: !lambda |-
-              std::vector<unsigned char> vec;
-              for (int i : cec_data) vec.push_back(static_cast<unsigned char>(i));
-              return vec;
+            data: !lambda "std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;"
+
+ota:
+  - platform: esphome
+    password: "..."
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "HDMI CEC Fallback Hotspot"
+    password: "..."
+
+mqtt:
+  broker: '192.168.1.100' # insert IP or DNS of your own MQTT broker (e.g. the IP of your HA server)
+  username: !secret mqtt_user # make sure your MQTT username is added to the secrets file in the ESPHome Add-on
+  password: !secret mqtt_password # make sure your MQTT password is added to the secrets file in the ESPHome Add-on
+  discovery: false # if you only want your own MQTT topics
+
+captive_portal:
+
+external_components:
+  - source: github://Palakis/esphome-hdmi-cec
 
 hdmi_cec:
   # Pick a GPIO pin that can do both input AND output
