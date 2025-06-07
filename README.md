@@ -118,11 +118,14 @@ hdmi_cec:
 
 ```
 
-List of triggers to handle specific commands. Each trigger has the following optional filter parameters:
+You can filter by:
+
   * "source": match messages coming from the specified address
   * "destination": match messages meant for the specified address
   * "opcode": match messages bearing the specified opcode
   * "data": exact-match on message content
+
+If no filter is set, you will catch all messages.
 
 ---
 
@@ -140,7 +143,7 @@ button:
         data: [0x36]
 ```
 
-> More button examples can be found further down.
+> More button examples in the advanced EHPHome configuration example below.
 
 ---
 
@@ -216,7 +219,7 @@ Create a readable message with device names and actions.
           id(cec_translated_message).publish_state(readable);
 ```
 
-#### And add two `text_sensor:` blocks:
+#### And add two `text_sensor:` blocks (required):
 
 ```yaml
 text_sensor:
@@ -326,6 +329,7 @@ hdmi_cec:
           # both "destination" and "data" are templatable
           destination: !lambda return source;
           data: [0x8E, 0x01] # 0x01 => "Menu Deactivated"
+
     - then:
         - mqtt.publish:
             topic: cec_messages
@@ -335,6 +339,7 @@ hdmi_cec:
               frame.push_back((source << 4) | (destination & 0xF));
               frame.insert(frame.end(), data.begin(), data.end());
               return hdmi_cec::bytes_to_string(frame);
+
         - lambda: |-
             id(cec_raw_message).publish_state("...");
             id(cec_translated_message).publish_state("...");
