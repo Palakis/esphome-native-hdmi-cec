@@ -101,6 +101,8 @@ All of the following are optional – include only what you need.
 Add under `hdmi_cec:`:
 
 ```yaml
+hdmi_cec:
+  ...
   on_message:
     - opcode: 0x36  # "Standby"
       then:
