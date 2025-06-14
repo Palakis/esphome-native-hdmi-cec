@@ -23,11 +23,11 @@ namespace hdmi_cec {
 class Decoder {
  public:
   Decoder(const Frame &frame) : frame_(frame), length_(0), offset_(2) {}
-  std::string decode(uint8_t my_address);
+  std::string decode();
 
  protected:
   const char *find_opcode_name(uint32_t opcode) const;
-  std::string address_decode(uint8_t my_address) const;
+  std::string address_decode() const;
 
   /**
    * Generic operand decode method, later specialised with operand-type-specific methods
@@ -130,11 +130,7 @@ class Decoder {
   /**
    * Helper function to implement the 'do_operand' methods
    */
-  bool append_operand(const char *word, uint8_t offset_incr = 1) {
-    length_ += snprintf(&line_[length_], (line_.size() - length_), "[%s]", word);
-    offset_ += offset_incr;
-    return (length_ < line_.size()) && (offset_ < frame_.size());
-  }
+  bool append_operand(const char *word, uint8_t offset_incr = 1);
 
   template<uint32_t N_STRINGS> bool append_operand(const std::array<const char *, N_STRINGS> &strings) {
     uint32_t operand_value = frame_[offset_];

@@ -36,7 +36,7 @@ Frame::Frame(uint8_t initiator_addr, uint8_t target_addr, const std::vector<uint
   std::memcpy(this->data() + 1, payload.data(), payload.size());
 }
 
-std::string Frame::to_string(uint8_t my_address) const {
+std::string Frame::to_string() const {
   std::string result;
   char part_buffer[3];
   for (auto it = this->cbegin(); it != this->cend(); it++) {
@@ -50,7 +50,7 @@ std::string Frame::to_string(uint8_t my_address) const {
   }
 #ifdef USE_DECODER
   Decoder decoder(*this);
-  result += " " + decoder.decode(my_address);
+  result += " => " + decoder.decode();
 #endif
   return result;
 }
@@ -99,7 +99,7 @@ void HDMICEC::loop() {
       continue;
     }
 
-    ESP_LOGD(TAG, "frame received: %s", frame.to_string(address_).c_str());
+    ESP_LOGD(TAG, "frame received: %s", frame.to_string().c_str());
 
     std::vector<uint8_t> data(frame.begin() + 1, frame.end());
 
@@ -224,7 +224,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
   // prepare the bytes to send
   Frame frame(source, destination, data_bytes);
-  ESP_LOGD(TAG, "sending frame: %s", frame.to_string(address_).c_str());
+  ESP_LOGD(TAG, "sending frame: %s", frame.to_string().c_str());
 
   {
     LockGuard send_lock(send_mutex_);
