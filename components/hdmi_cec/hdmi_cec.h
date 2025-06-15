@@ -1,7 +1,8 @@
 #pragma once
 
+#include <array>
 #include <vector>
-#include <queue>
+#include <atomic>
 
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
@@ -36,6 +37,54 @@ enum class SendResult : uint8_t {
   NoAck = 2,
 };
 
+/*
+* The FrameRingBuffer is a container for Frames to queue data in a consumer-producer
+* application. The use of std::Atomics allows safe multi-thread operation when used with
+* a single producer and single consumer thread, where each Atomic index is updated
+* by one thread only.
+* After initialization, it operates without dynamic memmory allocation.
+* This allows the gpio isr to safely and efficiently pick-up and pass Frames.
+* Due to its fixed memory size, it might return NULL pointers in case the buffer is full or empty.
+*/
+template <unsigned int SIZE>
+class FrameRingBuffer {
+  public:
+  FrameRingBuffer()
+  : front_inx_{0}
+  , back_inx_{0}
+  , store_{} {
+    for (auto& t : store_) {
+      t = new Frame;
+      t->reserve(Frame::MAX_LENGTH);
+    }
+  }
+  ~FrameRingBuffer() {
+    for (auto& t : store_) {
+      delete t;
+    }
+  }
+  // 'front' is used to access data, use that, and recycle its memory space for later use.
+  Frame* front() const { return is_empty() ? nullptr : store_[front_inx_]; }
+  void push_front() { cyclic_incr(front_inx_); }
+  // 'back' is used to fetch a free Frame, fill with data, and queue for later pick-up
+  Frame* back() const { return is_full() ? nullptr : (store_[back_inx_]->clear(), store_[back_inx_]); }
+  void push_back() { cyclic_incr(back_inx_); }
+  bool is_empty() const {return count() == 0;}
+  bool is_full() const {return count() == SIZE;}  // using safe wrap-around of unsignd int
+  void reset() {front_inx_ = 0; back_inx_ = 0;}
+
+  protected:
+  using Index = std::atomic<unsigned int>;
+  // this simple increment scheme is sufficiently 'atomic' if the front and back are each used by
+  // one thread only. (So, at most one reader thread and one writer thread in the application.)
+  int count() const {int n = (int)(back_inx_ - front_inx_); if (n < 0) n += SIZE + 1; return n;}
+  void cyclic_incr(Index &inx) { inx = (inx == SIZE) ? 0 : (inx + 1); }
+  Index front_inx_;  // ranging 0 .. SIZE
+  Index back_inx_;   // ranging 0 .. SIZE
+  // if front_inx_ == back_inx_ the store is empty, so it can hold at most SIZE elements
+  std::array<Frame*, SIZE + 1> store_;
+};
+
 class MessageTrigger;
 
 class HDMICEC : public Component {
@@ -68,6 +117,7 @@ protected:
   void set_pin_input_high();
   void set_pin_output_low();
 
+  constexpr static int MAX_FRAMES_QUEUED = 4;
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
   uint8_t address_;
@@ -77,14 +127,15 @@ protected:
   std::vector<uint8_t> osd_name_bytes_;
   std::vector<MessageTrigger*> message_triggers_;
 
-  uint32_t last_falling_edge_us_; // timepoint in received message
-  uint32_t last_sent_us_;         // timepoint on end of sent message
+  bool last_level_ = true;            // cec line level on last isr call
+  uint32_t last_falling_edge_us_ = 0; // timepoint in received message
+  uint32_t last_sent_us_ = 0;         // timepoint on end of sent message
   ReceiverState receiver_state_;
-  uint8_t recv_bit_counter_;
-  uint8_t recv_byte_buffer_;
-  Frame recv_frame_buffer_;
-  std::queue<Frame> recv_queue_;
-  bool recv_ack_queued_;
+  uint8_t recv_bit_counter_ = 0;
+  uint8_t recv_byte_buffer_ = 0;
+  Frame *frame_receive_ = nullptr;
+  FrameRingBuffer<MAX_FRAMES_QUEUED> frames_queue_;
+  bool recv_ack_queued_ = false;
   Mutex send_mutex_;
 };
 
