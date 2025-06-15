@@ -245,7 +245,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
       auto result = send_frame_(frame, is_broadcast);
       if (result == SendResult::Success) {
-        ESP_LOGD(TAG, "HDMICEC::send(): frame sent and acknowledged");
+        ESP_LOGD(TAG, "frame sent and acknowledged");
         return true;
       }
       ESP_LOGI(TAG, "HDMICEC::send(): frame not sent: %s",
