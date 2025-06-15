@@ -324,6 +324,7 @@ const Decoder::CecOpcodeTable Decoder::cec_opcode_table = {
     {0x04, {"Image View On", &Decoder::do_operand<None>}},
     {0x00, {"Feature Abort", &Decoder::do_operand<Two(FeatureOpcode, AbortReason)>}},
     {0x0D, {"Text View On", &Decoder::do_operand<None>}},
+    {0x82, {"Active Source", &Decoder::do_operand<PhysicalAddress>}},
     {0x9D, {"Inactive Source", &Decoder::do_operand<PhysicalAddress>}},
     {0x85, {"Request Active Source", &Decoder::do_operand<None>}},
     {0x80, {"Routing Change", &Decoder::do_operand<Two(PhysicalAddress, PhysicalAddress)>}},
