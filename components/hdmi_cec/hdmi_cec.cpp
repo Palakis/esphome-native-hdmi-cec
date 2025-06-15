@@ -98,7 +98,7 @@ void HDMICEC::loop() {
       continue;
     }
 
-    ESP_LOGD(TAG, "frame received: %s", frame.to_string().c_str());
+    ESP_LOGD(TAG, "[received] %s", frame.to_string().c_str());
 
     std::vector<uint8_t> data(frame.begin() + 1, frame.end());
 
@@ -223,7 +223,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
   // prepare the bytes to send
   Frame frame(source, destination, data_bytes);
-  ESP_LOGD(TAG, "sending frame: %s", frame.to_string().c_str());
+  ESP_LOGD(TAG, "[sending] %s", frame.to_string().c_str());
 
   {
     LockGuard send_lock(send_mutex_);
