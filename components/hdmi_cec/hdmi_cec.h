@@ -11,9 +11,17 @@
 namespace esphome {
 namespace hdmi_cec {
 
-using Frame = std::vector<uint8_t>;
-constexpr static int MAX_FRAME_SIZE = 16;  // according to hdmi cec standard
-std::string bytes_to_string(const Frame *bytes);
+class Frame : public std::vector<uint8_t> {
+ public:
+  Frame() = default;
+  Frame(uint8_t initiator_addr, uint8_t target_addr, const std::vector<uint8_t> &payload);
+  uint8_t initiator_addr() const { return (this->at(0) >> 4) & 0xf; }
+  uint8_t destination_addr() const { return this->at(0) & 0xf; }
+  uint8_t opcode() const { return (this->size() >= 2) ? this->at(1) : 0; }
+  bool is_broadcast() const { return this->destination_addr() == 0xf; }
+  std::string to_string() const;
+  constexpr static int MAX_LENGTH = 16;  // from HDMI CEC standard 1.4
+};
 
 enum class ReceiverState : uint8_t {
   Idle = 0,
@@ -47,7 +55,7 @@ class FrameRingBuffer {
   , store_{} {
     for (auto& t : store_) {
       t = new Frame;
-      t->reserve(MAX_FRAME_SIZE);
+      t->reserve(Frame::MAX_LENGTH);
     }
   }
   ~FrameRingBuffer() {
@@ -102,7 +110,7 @@ protected:
   static void gpio_intr_(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
   void try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data);
-  SendResult send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast);
+  SendResult send_frame_(const Frame &frame, bool is_broadcast);
   bool send_start_bit_();
   void send_bit_(bool bit_value);
   bool send_high_and_test_();
