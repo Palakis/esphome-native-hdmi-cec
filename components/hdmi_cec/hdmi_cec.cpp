@@ -1,6 +1,10 @@
 #include "hdmi_cec.h"
 #include "esphome/core/log.h"
 
+#ifdef USE_CEC_DECODER
+#include "cec_decoder.h"
+#endif
+
 namespace esphome {
 namespace hdmi_cec {
 
@@ -24,18 +28,28 @@ static const gpio::Flags OUTPUT_MODE_FLAGS = gpio::FLAG_OUTPUT | gpio::FLAG_OPEN
 // Therefor, 'OUTPUT' will be used only to write '0': For writing a '1' the mode is switched to 'INPUT | PULLUP'.
 // That allows to safely check for cec bus conflicts on writing '1' (avoid short-circuit with other bus initiators).
 
-std::string bytes_to_string(const Frame *bytes) {
+Frame::Frame(uint8_t initiator_addr, uint8_t target_addr, const std::vector<uint8_t> &payload)
+    : std::vector<uint8_t>(1 + payload.size(), (uint8_t) (0)) {
+  this->at(0) = ((initiator_addr & 0xf) << 4) | (target_addr & 0xf);
+  std::memcpy(this->data() + 1, payload.data(), payload.size());
+}
+
+std::string Frame::to_string() const {
   std::string result;
   char part_buffer[3];
-  for (auto it = bytes->begin(); it != bytes->end(); it++) {
+  for (auto it = this->cbegin(); it != this->cend(); it++) {
     uint8_t byte_value = *it;
     sprintf(part_buffer, "%02X", byte_value);
     result += part_buffer;
 
-    if (it != (bytes->end() - 1)) {
+    if (it != (this->end() - 1)) {
       result += ":";
     }
   }
+#ifdef USE_CEC_DECODER
+  Decoder decoder(*this);
+  result += " => " + decoder.decode();
+#endif
   return result;
 }
 
@@ -83,8 +97,7 @@ void HDMICEC::loop() {
       continue;
     }
 
-    auto frame_str = bytes_to_string(frame);
-    ESP_LOGD(TAG, "frame received: %s", frame_str.c_str());
+    ESP_LOGD(TAG, "[received] %s", frame->to_string().c_str());
 
     std::vector<uint8_t> data(frame->begin() + 1, frame->end());
 
@@ -211,11 +224,8 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   bool is_broadcast = (destination == 0xF);
 
   // prepare the bytes to send
-  uint8_t header = (((source & 0x0F) << 4) | (destination & 0x0F));
-  Frame frame = { header };
-  frame.insert(frame.end(), data_bytes.begin(), data_bytes.end());
-  std::string bytes_to_send = bytes_to_string(&frame);
-  ESP_LOGD(TAG, "sending frame: %s", bytes_to_send.c_str());
+  Frame frame(source, destination, data_bytes);
+  ESP_LOGD(TAG, "[sending] %s", frame.to_string().c_str());
 
   {
     LockGuard send_lock(send_mutex_);
@@ -237,7 +247,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
       auto result = send_frame_(frame, is_broadcast);
       if (result == SendResult::Success) {
-        ESP_LOGD(TAG, "HDMICEC::send(): frame sent and acknowledged");
+        ESP_LOGD(TAG, "frame sent and acknowledged");
         return true;
       }
       ESP_LOGI(TAG, "HDMICEC::send(): frame not sent: %s",
@@ -251,7 +261,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   return false;
 }
 
-SendResult IRAM_ATTR HDMICEC::send_frame_(const std::vector<uint8_t> &frame, bool is_broadcast) {
+SendResult IRAM_ATTR HDMICEC::send_frame_(const Frame &frame, bool is_broadcast) {
   pin_->detach_interrupt();  // do NOT listen for pin changes while sending
   auto result = SendResult::Success;
 
