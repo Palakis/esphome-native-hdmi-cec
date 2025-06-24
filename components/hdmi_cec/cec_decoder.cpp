@@ -451,6 +451,7 @@ std::string Decoder::decode() {
   result += std::string("<") + it->second.name + ">";
   // operand fields
   length_ = 0;  // currently accumulated length of text of operands
+  line_[length_] = 0;  // initialise operand text to empty string
   offset_ = 2;  // location in frame of first operand to decode
   OperandDecode_f f = it->second.decode_f;
   (this->*f)();
