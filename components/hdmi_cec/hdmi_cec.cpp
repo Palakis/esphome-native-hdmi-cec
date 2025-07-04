@@ -34,7 +34,7 @@ Frame::Frame(uint8_t initiator_addr, uint8_t target_addr, const std::vector<uint
   std::memcpy(this->data() + 1, payload.data(), payload.size());
 }
 
-std::string Frame::to_string() const {
+std::string Frame::to_string(bool skip_decode) const {
   std::string result;
   char part_buffer[3];
   for (auto it = this->cbegin(); it != this->cend(); it++) {
@@ -47,8 +47,10 @@ std::string Frame::to_string() const {
     }
   }
 #ifdef USE_CEC_DECODER
-  Decoder decoder(*this);
-  result += " => " + decoder.decode();
+  if (!skip_decode) {
+    Decoder decoder(*this);
+    result += " => " + decoder.decode();
+  }
 #endif
   return result;
 }
