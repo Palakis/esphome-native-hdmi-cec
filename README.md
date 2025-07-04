@@ -230,6 +230,53 @@ text_sensor:
 
 ---
 
+### ✎6. Runtime configuration of the physical and logical address of HDMI
+
+If you want the logical address and the physical address to be configurable, you can add input number fields.
+
+```yaml
+number:
+  - platform: template
+    optimistic: true
+    entity_category: config
+    name: HDMI Logical address
+    step: 1
+    min_value: 0x1 # Recording device 1
+    max_value: 0xb # Playback device 3
+    icon: "mdi:video-input-hdmi"
+    restore_value: true
+    on_value:
+      - then:
+          lambda: |-
+            id(hdmicec)->set_address(x);
+  - platform: template
+    optimistic: true
+    entity_category: config
+    name: HDMI Physical address
+    id: hdmi_phys_addr
+    disabled_by_default: true
+    step: 1
+    min_value: 0x1000
+    max_value: 0x4fff # Assuming up to 4 HDMI ports
+    initial_value: 0x1001 # Avoid conflict with any existing device.
+    mode: box
+    icon: "mdi:hdmi-port"
+    restore_value: true
+    on_value:
+      - lambda: |-
+          id(hdmicec)->set_physical_address(x);
+
+hdmi_cec:
+  id: hdmicec
+  ...
+```
+You may also consider adding 2 separate number fields - HDMI port (1-4) and adjustment (0-15) to calculate the physical address as  
+`physical address = (port * 0x1000 + adjustment)` (0x1000-0x100f, 0x4000-0x400f)
+The adjustment field is used to avoid conflicts with any existing device on those ports.
+Note that the physical_address and address fields still need to be specified in the `hdmi_cec:` section.
+
+---
+
 ## 🧪 Advanced Example (All Features Combined)
 
 Here’s a full YAML snippet that includes all optional features together:
