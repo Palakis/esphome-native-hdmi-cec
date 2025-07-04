@@ -47,7 +47,7 @@ std::string Frame::to_string(bool skip_decode) const {
     }
   }
 #ifdef USE_CEC_DECODER
-  if (! skip_decode) {
+  if (!skip_decode) {
     Decoder decoder(*this);
     result += " => " + decoder.decode();
   }
