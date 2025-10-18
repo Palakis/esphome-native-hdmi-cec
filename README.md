@@ -22,9 +22,9 @@ Make your ESPHome devices speak the (machine) language of your living room with 
 
 - Automatic Physical Address Discovery through E-DDC
 
-## 🚀 Getting Started (Quick Overview)
+## Getting Started (Quick Overview)
 
-### 🪰 Step 1: Connect the hardware
+### Step 1: Connect the hardware
 
 Connect the microcontroller to an HDMI connector (HDMI connectors and breakout boards can be found on Amazon and AliExpress)
 
@@ -37,7 +37,7 @@ Connect the microcontroller to an HDMI connector (HDMI connectors and breakout b
 > CEC uses 3.3V logic – safe for ESP32/ESP8266 (or any other microcontroller with 3.3V logic).
 
 
-### 🧱 Step 2: Set up ESPHome
+### Step 2: Set up ESPHome
 
 * Start by creating your device using **ESPHome Device Builder** (e.g., via Home Assistant’s ESPHome Add-on or ESPHome Web).
 * Once your device is created, click **"Edit"** to access the YAML configuration.
@@ -45,7 +45,7 @@ Connect the microcontroller to an HDMI connector (HDMI connectors and breakout b
 
 ---
 
-### 📦 Step 3: Add the component
+### Step 3: Add the component
 
 In your ESPhome YAML configuration, add this Git repository as an external component (e.g. below captive portal):
 
@@ -56,7 +56,7 @@ external_components:
 
 ---
 
-### 🧠 Step 4: Basic HDMI-CEC Setup
+### Step 4: Basic HDMI-CEC Setup
 
 Add the `hdmi_cec:` block:
 
@@ -96,7 +96,7 @@ All of the following are optional – include only what you need.
 
 ---
 
-### 🔀 1. React to Incoming Messages
+### 1. React to Incoming Messages
 
 Add under `hdmi_cec:`:
 
@@ -129,7 +129,7 @@ If no filter is set, you will catch all messages.
 
 ---
 
-### 🔘 2. Add Template Buttons to Send CEC Commands
+### 2. Add Template Buttons to Send CEC Commands
 
 Add a `button:` section to create UI buttons:
 
@@ -147,7 +147,7 @@ button:
 
 ---
 
-### 🌐 3. Enable CEC Commands via Home Assistant Services
+### 3. Enable CEC Commands via Home Assistant Services
 
 Under `api:`:
 
@@ -169,7 +169,7 @@ api:
 
 ---
 
-### ☁️ 4. Publish CEC Messages over MQTT ([CEC-O-MATIC](https://www.cec-o-matic.com/) format)
+### 4. Publish CEC Messages over MQTT ([CEC-O-MATIC](https://www.cec-o-matic.com/) format)
 
 Under `mqtt:` and `hdmi_cec:`:
 
@@ -194,7 +194,7 @@ hdmi_cec:
 
 ---
 
-### 🔍 5. Decode and Translate CEC Messages (Text Sensor + Decoder)
+### 5. Decode and Translate CEC Messages (Text Sensor + Decoder)
 
 Create a readable message with device names and actions.
 
@@ -230,7 +230,7 @@ text_sensor:
 
 ---
 
-## 🧪 Advanced Example (All Features Combined)
+## Advanced Example (All Features Combined)
 
 Here’s a full YAML snippet that includes all optional features together:
 
@@ -325,7 +325,7 @@ hdmi_cec:
             id(cec_raw_message).publish_state(frame.to_string(true));
             id(cec_translated_message).publish_state(frame.to_string());
 
-text_sensor: #Consider excluding these sensors from you Home Assistant database to save space.
+text_sensor: #Consider excluding these sensors from your Home Assistant database to save space.
   - platform: template
     name: "HDMI CEC Raw Message"
     id: cec_raw_message #Do not delete if used with CEC message decoder
@@ -387,7 +387,7 @@ button:
         data: [0x44, 0x43]
 
   - platform: template
-    name: "Turn on Playback device 1"
+    name: "Turn on Playback device 1" # Apple TV 
     on_press:
       hdmi_cec.send:
         # "source" can optionally be set, like if you want to spoof another device's address
@@ -458,6 +458,17 @@ button:
         destination: 8
         data: [0x44, 0x46]
 ```
+
+---
+## 3D printed case (ESP32-C3 SuperMini)
+
+For those using an ESP32-C3 SuperMini, you can 3D-print a dedicated case designed by [DIYtechie on MakerWorld](https://makerworld.com/en/models/1488957-esp32-c3-hdmi-case#profileId-1761813).
+
+![ESP32-C3 HDMI case](https://github.com/DIYtechie/resources/blob/master/images/ESP32%20C3%20HDMI%20CASE.jpg?raw=true)
+
+The case is optimized for the ESP32-C3 SuperMini form factor and designed to fit all the required components (including [these HDMI sockets](https://a.aliexpress.com/_EyeES4c)) in the smallest possible footprint.  Follow MakerWorld link for detailed description and bill of materials.
+
+
 
 ---
 
