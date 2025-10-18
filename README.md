@@ -341,29 +341,30 @@ hdmi_cec:
 
   on_message:
 
-    - then:
-        - homeassistant.event:
-            event: esphome.hdmi_cec  # Home Assistant event type (visible in Developer Tools → Events)
-            data:
-              source: !lambda 'return source;'   # Logical address of the device that sent the message
-              destination: !lambda 'return destination;'  # Logical address of the target device
-              opcode: !lambda 'return data.size() ? data[0] : 0;'  # First byte of data = command opcode
-              raw: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string(true);'  # Full frame in hex (e.g. "40:36")
-              translated: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string();'  # Human-readable form (e.g. "TV → Broadcast: Standby")
+  # Send CEC messages as Home Assistant events
+  - then:
+      - homeassistant.event:
+          event: esphome.hdmi_cec # Home Assistant event type (visible in Developer Tools → Events)
+          data:
+            source: !lambda 'return source;'        # Logical address of the device that sent the message
+            destination: !lambda 'return destination;'  # Logical address of the target device
+            opcode: !lambda 'return data.size() ? data[0] : 0;'  # First byte of data = command opcode
+            raw: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string(true);'  # Full frame in hex (e.g. "40:36")
+            translated: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string();'  # Human-readable form (e.g. "TV → Broadcast: Standby")
 
-    - then:
-        #Send CEC messages via MQTT in CEC-O-Matic format
-        mqtt.publish:
+  # Send CEC messages via MQTT in CEC-O-Matic format
+  - then:
+      - mqtt.publish:
           topic: cec_messages
           payload: !lambda |-
             return hdmi_cec::Frame(source, destination, data).to_string(true);
-      
-      #CEC message decoder (human-readable translation)
-    - then:
-        - lambda: |-
-            hdmi_cec::Frame frame = hdmi_cec::Frame(source, destination, data);
-            id(cec_raw_message).publish_state(frame.to_string(true));
-            id(cec_translated_message).publish_state(frame.to_string());
+
+  # Publish decoded CEC messages as text sensors (raw and translated)
+  - then:
+      - lambda: |-
+          hdmi_cec::Frame frame = hdmi_cec::Frame(source, destination, data);
+          id(cec_raw_message).publish_state(frame.to_string(true));
+          id(cec_translated_message).publish_state(frame.to_string());
 
 text_sensor: #Consider excluding these sensors from your Home Assistant database to save space.
   - platform: template
