@@ -34,8 +34,11 @@ Connect the microcontroller to an HDMI connector (HDMI connectors and breakout b
 | 17 (CEC Ground)    | => | Ground                                  |
 | 18  (+5V (optional)) | => | 5V                                   |
 
-> CEC uses 3.3V logic – safe for ESP32/ESP8266 (or any other microcontroller with 3.3V logic).
+![How to connect HDMI to ESP32](https://github.com/DIYtechie/resources/blob/master/images/how%20to%20connect%20HDMI%20to%20ESP32.gif?raw=true)
 
+The HDMI breakout board shown is [this model on AliExpress](https://a.aliexpress.com/_EvuSss4).
+
+> CEC uses 3.3V logic – safe for ESP32/ESP8266 (or any other microcontroller with 3.3V logic).
 
 ### Step 2: Set up ESPHome
 
