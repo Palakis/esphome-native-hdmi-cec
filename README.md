@@ -344,7 +344,7 @@ text_sensor: #Consider excluding these sensors from your Home Assistant database
 # ----------------------------------------------------------
 # The examples below use Apple TV (playback device 1) and PlayStation 4 (playback device 2)
 # as references for typical CEC playback devices. 
-# Other devices may use different addresses or command opcodes — 
+# Other devices may use different command opcodes — 
 # refer to your device’s CEC documentation if the examples do not work as expected.
 
 button:
@@ -361,7 +361,7 @@ button:
       hdmi_cec.send:
         source: 1
         destination: 0
-        data: [0x04]      # Works for Samsung TVs. For LG, try [0x0D]; for Sony, [0x44, 0x6D].
+        data: [0x04]      # Works with Samsung TVs. For LG, try [0x0D]; for Sony, [0x44, 0x6D].
 
   - platform: template
     name: "Turn TV off"
