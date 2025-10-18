@@ -197,10 +197,7 @@ hdmi_cec:
 
 ### Text sensors (for dashboards or easier debugging)
 
-If you prefer to view the messages directly in a dashboard or entity list, you can also expose the decoded CEC messages as text sensors.
-This can make debugging easier since you can see the latest messages without opening Developer Tools.
-
-However, text sensors do store their state in Home Assistant’s database, so they will increase database size over time.
+If you prefer to monitor messages directly in a dashboard or entity list, you can also expose decoded CEC messages as text sensors. This may make debugging easier because you can see the latest messages without switching to Developer Tools. However, keep in mind that text sensors persist their state in Home Assistant’s database and may slightly increase database size over time.
 
 #### Add this under `hdmi_cec:`:
 
@@ -500,11 +497,11 @@ button:
 ---
 ## 3D printed case (ESP32-C3 SuperMini)
 
-For those using an ESP32-C3 SuperMini, you can 3D-print a dedicated case designed by [DIYtechie on MakerWorld](https://makerworld.com/en/models/1488957-esp32-c3-hdmi-case#profileId-1761813).
+If you’re using an ESP32-C3 SuperMini, you can 3D-print a dedicated case designed by [DIYtechie on MakerWorld](https://makerworld.com/en/models/1488957-esp32-c3-hdmi-case#profileId-1761813).
 
 ![ESP32-C3 HDMI case](https://github.com/DIYtechie/resources/blob/master/images/ESP32%20C3%20HDMI%20CASE.jpg?raw=true)
 
-The case is optimized for the ESP32-C3 SuperMini form factor and designed to fit all the required components (including [these HDMI sockets](https://a.aliexpress.com/_EyeES4c)) in the smallest possible footprint.  Follow MakerWorld link for detailed description and bill of materials.
+The case is optimized for the ESP32-C3 SuperMini form factor and designed to fit all the required components (including [thee HDMI sockets](https://a.aliexpress.com/_EyeES4c)) referenced) in the smallest possible footprint.  Follow MakerWorld link for detailed description and bill of materials.
 
 
 
