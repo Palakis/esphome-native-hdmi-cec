@@ -172,34 +172,35 @@ api:
 
 ---
 
-### 4. Publish CEC Messages over MQTT ([CEC-O-MATIC](https://www.cec-o-matic.com/) format)
+### 4. Get Raw and Human-readable CEC Messages as Home Assistant Events
 
-Under `mqtt:` and `hdmi_cec:`:
+When any HDMI-CEC message is received, send a Home Assistant event called "esphome.hdmi_cec". The event contains both the raw hexadecimal frame and a human-readable translation.
+These events are ideal for automations because they can be directly used as triggers in Home Assistant. They are also useful for debugging (visible under Developer Tools → Events) and do not consume space in Home Assistant’s database.
+
+#### Add this under `hdmi_cec:`:
 
 ```yaml
-mqtt:
-  broker: '192.168.1.100' # insert IP or DNS of your own MQTT broker (e.g. the IP of your HA server)
-  username: !secret mqtt_user # make sure your MQTT username is added to the secrets file in the ESPHome Add-on
-  password: !secret mqtt_password # make sure your MQTT password is added to the secrets file in the ESPHome Add-on
-  discovery: false # if you only want your own MQTT topics
-
 hdmi_cec:
   ...
-  promiscuous_mode: true
   on_message:
+    
     - then:
-        mqtt.publish:
-          topic: cec_messages
-          #Payload in CEC-O-Matic format
-          payload: !lambda |-
-            return hdmi_cec::Frame(source, destination, data).to_string(true);
+        - homeassistant.event:
+            event: esphome.hdmi_cec  # Home Assistant event type (visible in Developer Tools → Events)
+            data:
+              source: !lambda 'return source;'   # Logical address of the device that sent the message
+              destination: !lambda 'return destination;'  # Logical address of the target device
+              opcode: !lambda 'return data.size() ? data[0] : 0;'  # First byte of data = command opcode
+              raw: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string(true);'  # Full frame in hex (e.g. "40:36")
+              translated: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string();'  # Human-readable form (e.g. "TV → Broadcast: Standby")
 ```
 
----
+### Text sensors (for dashboards or easier debugging)
 
-### 5. Decode and Translate CEC Messages (Text Sensor + Decoder)
+If you prefer to view the messages directly in a dashboard or entity list, you can also expose the decoded CEC messages as text sensors.
+This can make debugging easier since you can see the latest messages without opening Developer Tools.
 
-Create a readable message with device names and actions.
+However, text sensors do store their state in Home Assistant’s database, so they will increase database size over time.
 
 #### Add this under `hdmi_cec:`:
 
@@ -229,7 +230,33 @@ text_sensor:
     id: cec_translated_message
     update_interval: never
 ```
-> If MQTT is enabled, the text sensor values (raw and translated) will also be sent via MQTT
+> Consider excluding these sensors from your Home Assistant database to save space. If MQTT is enabled, the text sensor values (raw and translated) will also be sent via MQTT
+
+
+---
+
+### 5. Publish CEC Messages over MQTT ([CEC-O-MATIC](https://www.cec-o-matic.com/) format)
+
+Under `mqtt:` and `hdmi_cec:`:
+
+```yaml
+mqtt:
+  broker: '192.168.1.100' # insert IP or DNS of your own MQTT broker (e.g. the IP of your HA server)
+  username: !secret mqtt_user # make sure your MQTT username is added to the secrets file in the ESPHome Add-on
+  password: !secret mqtt_password # make sure your MQTT password is added to the secrets file in the ESPHome Add-on
+  discovery: false # if you only want your own MQTT topics
+
+hdmi_cec:
+  ...
+  promiscuous_mode: true
+  on_message:
+    - then:
+        mqtt.publish:
+          topic: cec_messages
+          #Payload in CEC-O-Matic format
+          payload: !lambda |-
+            return hdmi_cec::Frame(source, destination, data).to_string(true);
+```
 
 ---
 
@@ -313,6 +340,16 @@ hdmi_cec:
   monitor_mode: false # Optional. Defaults to false
 
   on_message:
+
+    - then:
+        - homeassistant.event:
+            event: esphome.hdmi_cec  # Home Assistant event type (visible in Developer Tools → Events)
+            data:
+              source: !lambda 'return source;'   # Logical address of the device that sent the message
+              destination: !lambda 'return destination;'  # Logical address of the target device
+              opcode: !lambda 'return data.size() ? data[0] : 0;'  # First byte of data = command opcode
+              raw: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string(true);'  # Full frame in hex (e.g. "40:36")
+              translated: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string();'  # Human-readable form (e.g. "TV → Broadcast: Standby")
 
     - then:
         #Send CEC messages via MQTT in CEC-O-Matic format
