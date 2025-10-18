@@ -337,28 +337,34 @@ text_sensor: #Consider excluding these sensors from your Home Assistant database
     update_interval: never
 
 
+# Example button configuration for common HDMI-CEC commands
+# ----------------------------------------------------------
+# The examples below use Apple TV (playback device 1) and PlayStation 4 (playback device 2)
+# as references for typical CEC playback devices. 
+# Other devices may use different addresses or command opcodes — 
+# refer to your device’s CEC documentation if the examples do not work as expected.
+
 button:
   - platform: template
     name: "Turn all HDMI devices off"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
-        destination: 0xF # Broadcast
-        data: [0x36] # "Standby" opcode
+        destination: 0xF  # Broadcast
+        data: [0x36]      # "Standby" opcode
 
   - platform: template
     name: "Turn TV on"
     on_press:
       hdmi_cec.send:
-        source: 1 # can optionally be set, like if you want to spoof another device's address
+        source: 1
         destination: 0
-        data: [0x04]
+        data: [0x04]      # Works for Samsung TVs. For LG, try [0x0D]; for Sony, [0x44, 0x6D].
 
   - platform: template
     name: "Turn TV off"
     on_press:
       hdmi_cec.send:
-        source: 1 # can optionally be set, like if you want to spoof another device's address
+        source: 1
         destination: 0
         data: [0x36]
 
@@ -366,15 +372,13 @@ button:
     name: "Volume up"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
-        destination: 0x5
+        destination: 0x5  # Usually the Audio System
         data: [0x44, 0x41]
 
   - platform: template
     name: "Volume down"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0x5
         data: [0x44, 0x42]
 
@@ -382,81 +386,74 @@ button:
     name: "Mute"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0x5
         data: [0x44, 0x43]
 
+  # --- Playback Device 1 (Apple TV example) ---
   - platform: template
-    name: "Turn on Playback device 1" # Apple TV 
+    name: "Turn on Playback device 1"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
-        destination: 4
-        data: [0x44, 0x6D]
+        destination: 4     # Typical address for first playback device (Apple TV)
+        data: [0x44, 0x6D] # "Power On Function" / "Play"
 
   - platform: template
     name: "Turn off Playback device 1"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x36]
+        data: [0x36]       # "Standby"
 
   - platform: template
-    name: "Playback device 1 home button"
+    name: "Playback 1 Home"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x44, 0x09]
+        data: [0x44, 0x09] # "Root Menu"
 
   - platform: template
-    name: "Playback device 1 select/ok"
+    name: "Playback 1 Select/OK"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x44, 0x00]
+        data: [0x44, 0x00] # "Select"
 
   - platform: template
-    name: "Playback device 1 exit/back"
+    name: "Playback 1 Back/Exit"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x44, 0x0D]
+        data: [0x44, 0x0D] # "Exit"
 
   - platform: template
-    name: "Playback device 1 play/pause"
+    name: "Playback 1 Play/Pause"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x44, 0x44]
+        data: [0x44, 0x44] # "Play" / "Pause Toggle"
 
+  # --- Playback Device 2 (PlayStation 4 example) ---
   - platform: template
     name: "Turn on Playback device 2"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
-        destination: 8
-        data: [0x44, 0x6D]
+        destination: 8     # Typical address for second playback device (PS4)
+        data: [0x44, 0x6D] # May vary depending on firmware
 
   - platform: template
     name: "Turn off Playback device 2"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 8
         data: [0x36]
 
   - platform: template
-    name: "Playback device 2 play/pause"
+    name: "Playback 2 Play/Pause"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 8
         data: [0x44, 0x46]
+
 ```
 
 ---
