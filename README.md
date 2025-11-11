@@ -11,7 +11,7 @@ Make your ESPHome devices speak the (machine) language of your living room with 
 - Receive CEC commands
     - Handle incoming messages with `on_message` triggers
       - Each trigger specified in `on_message` supports filtering based on source, destination, opcode and/or message contents
-    - Built-in handlers for some of the system commands defined in the spec :
+    - Built-in handlers for some of the system commands defined in the spec:
       - _"Get CEC Version"_
       - _"Give Device Power Status"_
       - _"Give OSD Name"_
@@ -34,11 +34,11 @@ Connect the microcontroller to an HDMI connector (HDMI connectors and breakout b
 | 17 (CEC Ground)    | => | Ground                                  |
 | 18  (+5V (optional)) | => | 5V                                   |
 
-![How to connect HDMI to ESP32](https://github.com/DIYtechie/resources/blob/master/images/how%20to%20connect%20HDMI%20to%20ESP32.gif?raw=true)
-
-The HDMI breakout board shown is [this model on AliExpress](https://a.aliexpress.com/_EvuSss4).
-
 > CEC uses 3.3V logic – safe for ESP32/ESP8266 (or any other microcontroller with 3.3V logic).
+
+The video below demonstrates how to connect an [HDMI breakout board](https://a.aliexpress.com/_EvuSss4) to an ESP32 dev board:
+
+https://github.com/user-attachments/assets/71e847da-4b04-443f-9d97-f764fa97a007
 
 ### Step 2: Set up ESPHome
 
@@ -75,7 +75,7 @@ hdmi_cec:
   # DDC support is not yet implemented, so you'll have to set this manually.
   physical_address: 0x4000 # Required
   
-  # The name that will we displayed in the list of devices on your TV/receiver
+  # The name that will be displayed in the list of devices on your TV/receiver
   osd_name: "my device" # Optional. Defaults to "esphome"
   
   # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
@@ -146,7 +146,7 @@ button:
         data: [0x36]
 ```
 
-> More button examples in the advanced EHPHome configuration example below.
+> More button examples in the advanced ESPHome configuration example below.
 
 ---
 
@@ -206,7 +206,7 @@ hdmi_cec:
   ...
   on_message:
       
-      #CEC message decoder (human-readable translation)
+      # CEC message decoder (human-readable translation)
     - then:
         - lambda: |-
             std::string translated = hdmi_cec::Frame(source, destination, data).to_string();
@@ -259,7 +259,7 @@ hdmi_cec:
 
 ## Advanced Example (All Features Combined)
 
-Here’s a full YAML snippet that includes all optional features together:
+Here’s a full YAML snippet that includes all optional features together (just delete what you don't need):
 
 ```yaml
 esphome:
@@ -324,10 +324,10 @@ hdmi_cec:
   # DDC support is not yet implemented, so you'll have to set this manually.
   physical_address: 0x4200 # Required
   
-  # The name that will we displayed in the list of devices on your TV/receiver
+  # The name that will be displayed in the list of devices on your TV/receiver
   osd_name: "HDMI Bridge" # Optional. Defaults to "esphome"
   
-  # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
+  # By default, promiscuous mode is disabled, so the component only handles directly addressed messages (matching
   # the address configured above) and broadcast messages. Enabling promiscuous mode will make the component
   # listen for all messages (both in logs and the on_message triggers)
   promiscuous_mode: true # Optional. Defaults to false
@@ -495,13 +495,15 @@ button:
 ```
 
 ---
-## 3D printed case (ESP32-C3 SuperMini)
+## 3D-printed case (ESP32-C3 SuperMini)
 
 If you’re using an ESP32-C3 SuperMini, you can 3D-print a dedicated case designed by [DIYtechie on MakerWorld](https://makerworld.com/en/models/1488957-esp32-c3-hdmi-case#profileId-1761813).
 
-![ESP32-C3 HDMI case](https://github.com/DIYtechie/resources/blob/master/images/ESP32%20C3%20HDMI%20CASE.jpg?raw=true)
+<img src="https://github.com/DIYtechie/resources/blob/master/images/ESP32%20C3%20HDMI%20CASE.jpg?raw=true" alt="ESP32-C3 HDMI case" width="350">
 
-The case is optimized for the ESP32-C3 SuperMini form factor and designed to fit all the required components (including [thee HDMI sockets](https://a.aliexpress.com/_EyeES4c)) referenced) in the smallest possible footprint.  Follow MakerWorld link for detailed description and bill of materials.
+The case is optimized for the ESP32-C3 SuperMini form factor and designed to fit all the required components (including [the HDMI sockets](https://a.aliexpress.com/_EyeES4c) referenced) in the smallest possible footprint.  Follow the MakerWorld link for detailed description and bill of materials.
+
+_Want to share your own case design? Feel free to open a PR or shoot Palakis an e-mail (`hi at palakis dot fr`) to get them listed here._
 
 
 
@@ -511,7 +513,7 @@ The case is optimized for the ESP32-C3 SuperMini form factor and designed to fit
 
 | Platform  | Supported | Notes                             |
 | --------- | --------- | --------------------------------- |
-| ESP32     | ✅         | Fully supported (use type: esp-idf for ESP32-C3 |
+| ESP32     | ✅         | Fully supported |
 | ESP8266   | ✅         | Tested and works                  |
 | RP2040    | ✅         | Tested and works                  |
 | LibreTiny | ❌         | Not supported                     |
