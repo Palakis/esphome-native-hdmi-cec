@@ -11,7 +11,7 @@ Make your ESPHome devices speak the (machine) language of your living room with 
 - Receive CEC commands
     - Handle incoming messages with `on_message` triggers
       - Each trigger specified in `on_message` supports filtering based on source, destination, opcode and/or message contents
-    - Built-in handlers for some of the system commands defined in the spec :
+    - Built-in handlers for some of the system commands defined in the spec:
       - _"Get CEC Version"_
       - _"Give Device Power Status"_
       - _"Give OSD Name"_
@@ -22,9 +22,9 @@ Make your ESPHome devices speak the (machine) language of your living room with 
 
 - Automatic Physical Address Discovery through E-DDC
 
-## 🚀 Getting Started (Quick Overview)
+## Getting Started (Quick Overview)
 
-### 🪰 Step 1: Connect the hardware
+### Step 1: Connect the hardware
 
 Connect the microcontroller to an HDMI connector (HDMI connectors and breakout boards can be found on Amazon and AliExpress)
 
@@ -36,8 +36,11 @@ Connect the microcontroller to an HDMI connector (HDMI connectors and breakout b
 
 > CEC uses 3.3V logic – safe for ESP32/ESP8266 (or any other microcontroller with 3.3V logic).
 
+The video below demonstrates how to connect an [HDMI breakout board](https://a.aliexpress.com/_EvuSss4) to an ESP32 dev board:
 
-### 🧱 Step 2: Set up ESPHome
+https://github.com/user-attachments/assets/71e847da-4b04-443f-9d97-f764fa97a007
+
+### Step 2: Set up ESPHome
 
 * Start by creating your device using **ESPHome Device Builder** (e.g., via Home Assistant’s ESPHome Add-on or ESPHome Web).
 * Once your device is created, click **"Edit"** to access the YAML configuration.
@@ -45,7 +48,7 @@ Connect the microcontroller to an HDMI connector (HDMI connectors and breakout b
 
 ---
 
-### 📦 Step 3: Add the component
+### Step 3: Add the component
 
 In your ESPhome YAML configuration, add this Git repository as an external component (e.g. below captive portal):
 
@@ -56,7 +59,7 @@ external_components:
 
 ---
 
-### 🧠 Step 4: Basic HDMI-CEC Setup
+### Step 4: Basic HDMI-CEC Setup
 
 Add the `hdmi_cec:` block:
 
@@ -72,7 +75,7 @@ hdmi_cec:
   # DDC support is not yet implemented, so you'll have to set this manually.
   physical_address: 0x4000 # Required
   
-  # The name that will we displayed in the list of devices on your TV/receiver
+  # The name that will be displayed in the list of devices on your TV/receiver
   osd_name: "my device" # Optional. Defaults to "esphome"
   
   # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
@@ -96,7 +99,7 @@ All of the following are optional – include only what you need.
 
 ---
 
-### 🔀 1. React to Incoming Messages
+### 1. React to Incoming Messages
 
 Add under `hdmi_cec:`:
 
@@ -129,7 +132,7 @@ If no filter is set, you will catch all messages.
 
 ---
 
-### 🔘 2. Add Template Buttons to Send CEC Commands
+### 2. Add Template Buttons to Send CEC Commands
 
 Add a `button:` section to create UI buttons:
 
@@ -143,11 +146,11 @@ button:
         data: [0x36]
 ```
 
-> More button examples in the advanced EHPHome configuration example below.
+> More button examples in the advanced ESPHome configuration example below.
 
 ---
 
-### 🌐 3. Enable CEC Commands via Home Assistant Services
+### 3. Enable CEC Commands via Home Assistant Services
 
 Under `api:`:
 
@@ -169,7 +172,67 @@ api:
 
 ---
 
-### ☁️ 4. Publish CEC Messages over MQTT ([CEC-O-MATIC](https://www.cec-o-matic.com/) format)
+### 4. Get Raw and Human-readable CEC Messages as Home Assistant Events
+
+When any HDMI-CEC message is received, send a Home Assistant event called "esphome.hdmi_cec". The event contains both the raw hexadecimal frame and a human-readable translation.
+These events are ideal for automations because they can be directly used as triggers in Home Assistant. They are also useful for debugging (visible under Developer Tools → Events) and do not consume space in Home Assistant’s database.
+
+#### Add this under `hdmi_cec:`:
+
+```yaml
+hdmi_cec:
+  ...
+  on_message:
+    
+    - then:
+        - homeassistant.event:
+            event: esphome.hdmi_cec  # Home Assistant event type (visible in Developer Tools → Events)
+            data:
+              source: !lambda 'return source;'   # Logical address of the device that sent the message
+              destination: !lambda 'return destination;'  # Logical address of the target device
+              opcode: !lambda 'return data.size() ? data[0] : 0;'  # First byte of data = command opcode
+              raw: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string(true);'  # Full frame in hex (e.g. "40:36")
+              translated: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string();'  # Human-readable form (e.g. "TV → Broadcast: Standby")
+```
+
+### Text sensors (for dashboards or easier debugging)
+
+If you prefer to monitor messages directly in a dashboard or entity list, you can also expose decoded CEC messages as text sensors. This may make debugging easier because you can see the latest messages without switching to Developer Tools. However, keep in mind that text sensors persist their state in Home Assistant’s database and may slightly increase database size over time.
+
+#### Add this under `hdmi_cec:`:
+
+```yaml
+hdmi_cec:
+  ...
+  on_message:
+      
+      # CEC message decoder (human-readable translation)
+    - then:
+        - lambda: |-
+            std::string translated = hdmi_cec::Frame(source, destination, data).to_string();
+            id(cec_translated_message).publish_state(translated);
+```
+
+#### And add two `text_sensor:` blocks (required):
+
+```yaml
+text_sensor:
+  - platform: template
+    name: "HDMI CEC Raw Message"
+    id: cec_raw_message
+    update_interval: never
+
+  - platform: template
+    name: "HDMI CEC Translated Message"
+    id: cec_translated_message
+    update_interval: never
+```
+> Consider excluding these sensors from your Home Assistant database to save space. If MQTT is enabled, the text sensor values (raw and translated) will also be sent via MQTT
+
+
+---
+
+### 5. Publish CEC Messages over MQTT ([CEC-O-MATIC](https://www.cec-o-matic.com/) format)
 
 Under `mqtt:` and `hdmi_cec:`:
 
@@ -194,45 +257,9 @@ hdmi_cec:
 
 ---
 
-### 🔍 5. Decode and Translate CEC Messages (Text Sensor + Decoder)
+## Advanced Example (All Features Combined)
 
-Create a readable message with device names and actions.
-
-#### Add this under `hdmi_cec:`:
-
-```yaml
-hdmi_cec:
-  ...
-  on_message:
-      
-      #CEC message decoder (human-readable translation)
-    - then:
-        - lambda: |-
-            std::string translated = hdmi_cec::Frame(source, destination, data).to_string();
-            id(cec_translated_message).publish_state(translated);
-```
-
-#### And add two `text_sensor:` blocks (required):
-
-```yaml
-text_sensor:
-  - platform: template
-    name: "HDMI CEC Raw Message"
-    id: cec_raw_message
-    update_interval: never
-
-  - platform: template
-    name: "HDMI CEC Translated Message"
-    id: cec_translated_message
-    update_interval: never
-```
-> If MQTT is enabled, the text sensor values (raw and translated) will also be sent via MQTT
-
----
-
-## 🧪 Advanced Example (All Features Combined)
-
-Here’s a full YAML snippet that includes all optional features together:
+Here’s a full YAML snippet that includes all optional features together (just delete what you don't need):
 
 ```yaml
 esphome:
@@ -297,10 +324,10 @@ hdmi_cec:
   # DDC support is not yet implemented, so you'll have to set this manually.
   physical_address: 0x4200 # Required
   
-  # The name that will we displayed in the list of devices on your TV/receiver
+  # The name that will be displayed in the list of devices on your TV/receiver
   osd_name: "HDMI Bridge" # Optional. Defaults to "esphome"
   
-  # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
+  # By default, promiscuous mode is disabled, so the component only handles directly addressed messages (matching
   # the address configured above) and broadcast messages. Enabling promiscuous mode will make the component
   # listen for all messages (both in logs and the on_message triggers)
   promiscuous_mode: true # Optional. Defaults to false
@@ -311,21 +338,32 @@ hdmi_cec:
 
   on_message:
 
-    - then:
-        #Send CEC messages via MQTT in CEC-O-Matic format
-        mqtt.publish:
+  # Send CEC messages as Home Assistant events
+  - then:
+      - homeassistant.event:
+          event: esphome.hdmi_cec # Home Assistant event type (visible in Developer Tools → Events)
+          data:
+            source: !lambda 'return source;'        # Logical address of the device that sent the message
+            destination: !lambda 'return destination;'  # Logical address of the target device
+            opcode: !lambda 'return data.size() ? data[0] : 0;'  # First byte of data = command opcode
+            raw: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string(true);'  # Full frame in hex (e.g. "40:36")
+            translated: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string();'  # Human-readable form (e.g. "TV → Broadcast: Standby")
+
+  # Send CEC messages via MQTT in CEC-O-Matic format
+  - then:
+      - mqtt.publish:
           topic: cec_messages
           payload: !lambda |-
             return hdmi_cec::Frame(source, destination, data).to_string(true);
-      
-      #CEC message decoder (human-readable translation)
-    - then:
-        - lambda: |-
-            hdmi_cec::Frame frame = hdmi_cec::Frame(source, destination, data);
-            id(cec_raw_message).publish_state(frame.to_string(true));
-            id(cec_translated_message).publish_state(frame.to_string());
 
-text_sensor: #Consider excluding these sensors from you Home Assistant database to save space.
+  # Publish decoded CEC messages as text sensors (raw and translated)
+  - then:
+      - lambda: |-
+          hdmi_cec::Frame frame = hdmi_cec::Frame(source, destination, data);
+          id(cec_raw_message).publish_state(frame.to_string(true));
+          id(cec_translated_message).publish_state(frame.to_string());
+
+text_sensor: #Consider excluding these sensors from your Home Assistant database to save space.
   - platform: template
     name: "HDMI CEC Raw Message"
     id: cec_raw_message #Do not delete if used with CEC message decoder
@@ -337,28 +375,34 @@ text_sensor: #Consider excluding these sensors from you Home Assistant database 
     update_interval: never
 
 
+# Example button configuration for common HDMI-CEC commands
+# ----------------------------------------------------------
+# The examples below use Apple TV (playback device 1) and PlayStation 4 (playback device 2)
+# as references for typical CEC playback devices. 
+# Other devices may use different command opcodes — 
+# refer to your device’s CEC documentation if the examples do not work as expected.
+
 button:
   - platform: template
     name: "Turn all HDMI devices off"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
-        destination: 0xF # Broadcast
-        data: [0x36] # "Standby" opcode
+        destination: 0xF  # Broadcast
+        data: [0x36]      # "Standby" opcode
 
   - platform: template
     name: "Turn TV on"
     on_press:
       hdmi_cec.send:
-        source: 1 # can optionally be set, like if you want to spoof another device's address
+        source: 1
         destination: 0
-        data: [0x04]
+        data: [0x04]      # Works with Samsung TVs. For LG, try [0x0D]; for Sony, [0x44, 0x6D].
 
   - platform: template
     name: "Turn TV off"
     on_press:
       hdmi_cec.send:
-        source: 1 # can optionally be set, like if you want to spoof another device's address
+        source: 1
         destination: 0
         data: [0x36]
 
@@ -366,15 +410,13 @@ button:
     name: "Volume up"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
-        destination: 0x5
+        destination: 0x5  # Usually the Audio System
         data: [0x44, 0x41]
 
   - platform: template
     name: "Volume down"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0x5
         data: [0x44, 0x42]
 
@@ -382,82 +424,88 @@ button:
     name: "Mute"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 0x5
         data: [0x44, 0x43]
 
+  # --- Playback Device 1 (Apple TV example) ---
   - platform: template
     name: "Turn on Playback device 1"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
-        destination: 4
-        data: [0x44, 0x6D]
+        destination: 4     # Typical address for first playback device (Apple TV)
+        data: [0x44, 0x6D] # "Power On Function" / "Play"
 
   - platform: template
     name: "Turn off Playback device 1"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x36]
+        data: [0x36]       # "Standby"
 
   - platform: template
-    name: "Playback device 1 home button"
+    name: "Playback 1 Home"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x44, 0x09]
+        data: [0x44, 0x09] # "Root Menu"
 
   - platform: template
-    name: "Playback device 1 select/ok"
+    name: "Playback 1 Select/OK"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x44, 0x00]
+        data: [0x44, 0x00] # "Select"
 
   - platform: template
-    name: "Playback device 1 exit/back"
+    name: "Playback 1 Back/Exit"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x44, 0x0D]
+        data: [0x44, 0x0D] # "Exit"
 
   - platform: template
-    name: "Playback device 1 play/pause"
+    name: "Playback 1 Play/Pause"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 4
-        data: [0x44, 0x44]
+        data: [0x44, 0x44] # "Play" / "Pause Toggle"
 
+  # --- Playback Device 2 (PlayStation 4 example) ---
   - platform: template
     name: "Turn on Playback device 2"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
-        destination: 8
-        data: [0x44, 0x6D]
+        destination: 8     # Typical address for second playback device (PS4)
+        data: [0x44, 0x6D] # May vary depending on firmware
 
   - platform: template
     name: "Turn off Playback device 2"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 8
         data: [0x36]
 
   - platform: template
-    name: "Playback device 2 play/pause"
+    name: "Playback 2 Play/Pause"
     on_press:
       hdmi_cec.send:
-        # "source" can optionally be set, like if you want to spoof another device's address
         destination: 8
         data: [0x44, 0x46]
+
 ```
+
+---
+## 3D-printed case (ESP32-C3 SuperMini)
+
+If you’re using an ESP32-C3 SuperMini, you can 3D-print a dedicated case designed by [DIYtechie on MakerWorld](https://makerworld.com/en/models/1488957-esp32-c3-hdmi-case#profileId-1761813).
+
+<img src="https://github.com/DIYtechie/resources/blob/master/images/ESP32%20C3%20HDMI%20CASE.jpg?raw=true" alt="ESP32-C3 HDMI case" width="350">
+
+The case is optimized for the ESP32-C3 SuperMini form factor and designed to fit all the required components (including [the HDMI sockets](https://a.aliexpress.com/_EyeES4c) referenced) in the smallest possible footprint.  Follow the MakerWorld link for detailed description and bill of materials.
+
+_Want to share your own case design? Feel free to open a PR or shoot Palakis an e-mail (`hi at palakis dot fr`) to get them listed here._
+
+
 
 ---
 
@@ -465,7 +513,7 @@ button:
 
 | Platform  | Supported | Notes                             |
 | --------- | --------- | --------------------------------- |
-| ESP32     | ✅         | Fully supported (use type: esp-idf for ESP32-C3 |
+| ESP32     | ✅         | Fully supported |
 | ESP8266   | ✅         | Tested and works                  |
 | RP2040    | ✅         | Tested and works                  |
 | LibreTiny | ❌         | Not supported                     |
