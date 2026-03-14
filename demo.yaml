@@ -45,7 +45,6 @@ captive_portal:
 
 hdmi_cec:
   pin: GPIO26
-  address: 0x5
   physical_address: 0x4000
   on_message:
     # Volume Up

@@ -1,3 +1,5 @@
+import logging
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins, automation
@@ -5,6 +7,8 @@ from esphome.const import (
     CONF_ID,
     CONF_TRIGGER_ID
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@Palakis"]
 
@@ -16,12 +20,22 @@ CONF_MONITOR_MODE = "monitor_mode"
 CONF_DECODE_MESSAGES = "decode_messages"
 CONF_OSD_NAME = "osd_name"
 CONF_ON_MESSAGE = "on_message"
+CONF_DEVICE_TYPE = "device_type"
 
 CONF_SOURCE = "source"
 CONF_DESTINATION = "destination"
 CONF_OPCODE = "opcode"
 CONF_DATA = "data"
 CONF_PARENT = "parent"
+
+DEVICE_TYPES = {
+    "tv": 0x00,
+    "recording_device": 0x01,
+    "tuner": 0x03,
+    "playback_device": 0x04,
+    "audio_system": 0x05,
+    "other": 0xFF,
+}
 
 def validate_data_array(value):
     if isinstance(value, list):
@@ -55,26 +69,36 @@ SendAction = hdmi_cec_ns.class_(
     "SendAction", automation.Action
 )
 
-CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
-    {
-        cv.GenerateID(): cv.declare_id(HDMICEC),
-        cv.Required(CONF_PIN): pins.internal_gpio_output_pin_schema,
-        cv.Required(CONF_ADDRESS): cv.int_range(min=0, max=15),
-        cv.Required(CONF_PHYSICAL_ADDRESS): cv.uint16_t,
-        cv.Optional(CONF_PROMISCUOUS_MODE, False): cv.boolean,
-        cv.Optional(CONF_MONITOR_MODE, False): cv.boolean,
-        cv.Optional(CONF_DECODE_MESSAGES, True): cv.boolean,
-        cv.Optional(CONF_OSD_NAME, "esphome"): validate_osd_name,
-        cv.Optional(CONF_ON_MESSAGE): automation.validate_automation(
-            {
-                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(MessageTrigger),
-                cv.Optional(CONF_SOURCE): cv.int_range(min=0, max=15),
-                cv.Optional(CONF_DESTINATION): cv.int_range(min=0, max=15),
-                cv.Optional(CONF_OPCODE): cv.uint8_t,
-                cv.Optional(CONF_DATA): validate_data_array
-            }
-        )
-    }
+def validate_address_config(config):
+    has_device_type = CONF_DEVICE_TYPE in config or CONF_ADDRESS not in config
+    if has_device_type and config.get(CONF_MONITOR_MODE, False):
+        raise cv.Invalid("'device_type' cannot be used with 'monitor_mode' (passive devices don't negotiate)")
+    return config
+
+CONFIG_SCHEMA = cv.All(
+    cv.COMPONENT_SCHEMA.extend(
+        {
+            cv.GenerateID(): cv.declare_id(HDMICEC),
+            cv.Required(CONF_PIN): pins.internal_gpio_output_pin_schema,
+            cv.Optional(CONF_ADDRESS): cv.int_range(min=0, max=15),
+            cv.Required(CONF_PHYSICAL_ADDRESS): cv.uint16_t,
+            cv.Optional(CONF_DEVICE_TYPE): cv.enum(DEVICE_TYPES, lower=True),
+            cv.Optional(CONF_PROMISCUOUS_MODE, False): cv.boolean,
+            cv.Optional(CONF_MONITOR_MODE, False): cv.boolean,
+            cv.Optional(CONF_DECODE_MESSAGES, True): cv.boolean,
+            cv.Optional(CONF_OSD_NAME, "esphome"): validate_osd_name,
+            cv.Optional(CONF_ON_MESSAGE): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(MessageTrigger),
+                    cv.Optional(CONF_SOURCE): cv.int_range(min=0, max=15),
+                    cv.Optional(CONF_DESTINATION): cv.int_range(min=0, max=15),
+                    cv.Optional(CONF_OPCODE): cv.uint8_t,
+                    cv.Optional(CONF_DATA): validate_data_array
+                }
+            )
+        }
+    ),
+    validate_address_config,
 )
 
 async def to_code(config):
@@ -87,7 +111,19 @@ async def to_code(config):
     cec_pin_ = await cg.gpio_pin_expression(config[CONF_PIN])
     cg.add(var.set_pin(cec_pin_))
 
-    cg.add(var.set_address(config[CONF_ADDRESS]))
+    if CONF_ADDRESS in config:
+        _LOGGER.warning(
+            "hdmi_cec: Manually setting 'address' is deprecated and bypasses logical "
+            "address auto-negotiation. This can cause conflicts with other CEC devices "
+            "on the bus. Please remove 'address' and use 'device_type' instead."
+        )
+        cg.add(var.set_address(config[CONF_ADDRESS]))
+    else:
+        cg.add(var.set_address(0x0F))  # Unregistered until negotiation
+
+    if CONF_ADDRESS not in config:
+        cg.add(var.set_device_type(config.get(CONF_DEVICE_TYPE, DEVICE_TYPES["other"])))
+
     cg.add(var.set_physical_address(config[CONF_PHYSICAL_ADDRESS]))
     cg.add(var.set_promiscuous_mode(config[CONF_PROMISCUOUS_MODE]))
     cg.add(var.set_monitor_mode(config[CONF_MONITOR_MODE]))

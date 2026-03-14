@@ -96,6 +96,7 @@ public:
   void set_promiscuous_mode(bool promiscuous_mode) { promiscuous_mode_ = promiscuous_mode; }
   void set_monitor_mode(bool monitor_mode) { monitor_mode_ = monitor_mode; }
   void set_osd_name_bytes(const std::vector<uint8_t> &osd_name_bytes) { osd_name_bytes_ = osd_name_bytes; }
+  void set_device_type(uint8_t device_type) { device_type_ = device_type; negotiation_needed_ = true; }
   void add_message_trigger(MessageTrigger *trigger) { message_triggers_.push_back(trigger); }
 
   bool send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes);
@@ -110,6 +111,9 @@ protected:
   static void gpio_intr_(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
   void try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data);
+  bool test_address_available_(uint8_t candidate_address);
+  void negotiate_address_();
+  void broadcast_physical_address_();
   SendResult send_frame_(const Frame &frame, bool is_broadcast);
   bool send_start_bit_();
   void send_bit_(bool bit_value);
@@ -124,6 +128,8 @@ protected:
   uint16_t physical_address_;
   bool promiscuous_mode_;
   bool monitor_mode_;
+  optional<uint8_t> device_type_;
+  bool negotiation_needed_ = false;
   std::vector<uint8_t> osd_name_bytes_;
   std::vector<MessageTrigger*> message_triggers_;
 
