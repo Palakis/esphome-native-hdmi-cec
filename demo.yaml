@@ -44,8 +44,22 @@ wifi:
 captive_portal:
 
 hdmi_cec:
+  id: cec
   pin: GPIO26
   physical_address: 0x4000
+  scan_on_boot: true
+  scan_boot_delay: 3s
+  on_scan_complete:
+    - then:
+        - lambda: |-
+            for (uint8_t i = 0; i < 15; i++) {
+              if (id(cec).seen_on_last_scan(i)) {
+                auto &dev = id(cec).get_device_info(i);
+                ESP_LOGI("cec_scan", "Device 0x%X: type=%d phys=%04X name='%s' vendor=%06X",
+                         i, dev.device_type, dev.physical_address,
+                         dev.osd_name.c_str(), dev.vendor_id);
+              }
+            }
   on_message:
     # Volume Up
     - data: [0x44, 0x41]

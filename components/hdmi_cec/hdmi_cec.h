@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <vector>
 #include <atomic>
 
@@ -85,7 +86,19 @@ class FrameRingBuffer {
   std::array<Frame*, SIZE + 1> store_;
 };
 
+struct DeviceInfo {
+  uint8_t device_type = 0xFF;
+  uint16_t physical_address = 0xFFFF;
+  std::string osd_name;
+  uint32_t vendor_id = 0xFFFFFF;
+  uint8_t power_status = 0xFF;
+  uint8_t cec_version = 0xFF;
+  bool active_source = false;
+  uint32_t last_seen_ms = 0;
+};
+
 class MessageTrigger;
+class ScanCompleteTrigger;
 
 class HDMICEC : public Component {
 public:
@@ -98,8 +111,22 @@ public:
   void set_osd_name_bytes(const std::vector<uint8_t> &osd_name_bytes) { osd_name_bytes_ = osd_name_bytes; }
   void set_device_type(uint8_t device_type) { device_type_ = device_type; negotiation_needed_ = true; }
   void add_message_trigger(MessageTrigger *trigger) { message_triggers_.push_back(trigger); }
+  void add_scan_complete_trigger(ScanCompleteTrigger *trigger) { scan_complete_triggers_.push_back(trigger); }
 
   bool send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes);
+
+  // Bus scanning
+  void start_scan();
+  bool is_scanning() const { return scanning_; }
+  void set_scan_on_boot(bool val) { scan_on_boot_ = val; }
+  void set_scan_boot_delay(uint32_t ms) { scan_boot_delay_ms_ = ms; }
+
+  // Device registry queries
+  const DeviceInfo &get_device_info(uint8_t logical_address) const;
+  bool seen_on_last_scan(uint8_t logical_address) const;
+  optional<uint8_t> find_address_by_osd_name(const std::string &name) const;
+  optional<uint8_t> find_address_by_physical_address(uint16_t addr) const;
+  optional<uint8_t> find_address_by_vendor_and_type(uint32_t vendor_id, uint8_t device_type) const;
 
   // Component overrides
   float get_setup_priority() { return esphome::setup_priority::HARDWARE; }
@@ -114,6 +141,8 @@ protected:
   bool test_address_available_(uint8_t candidate_address);
   void negotiate_address_();
   void broadcast_physical_address_();
+  void complete_scan_();
+  void update_device_registry_(uint8_t src, uint8_t dest, const std::vector<uint8_t> &data);
   SendResult send_frame_(const Frame &frame, bool is_broadcast);
   bool send_start_bit_();
   void send_bit_(bool bit_value);
@@ -121,6 +150,7 @@ protected:
   void set_pin_input_high();
   void set_pin_output_low();
 
+  constexpr static uint8_t MAX_LOGICAL_ADDRESS = 0xE;  // highest assignable logical address (0xF is broadcast)
   constexpr static int MAX_FRAMES_QUEUED = 4;
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
@@ -143,6 +173,15 @@ protected:
   FrameRingBuffer<MAX_FRAMES_QUEUED> frames_queue_;
   bool recv_ack_queued_ = false;
   Mutex send_mutex_;
+
+  // Device registry and scanning
+  std::array<DeviceInfo, MAX_LOGICAL_ADDRESS + 1> device_registry_;
+  bool scanning_ = false;
+  std::array<bool, MAX_LOGICAL_ADDRESS + 1> scan_pending_ = {};
+  uint32_t last_scan_start_ms_ = 0;
+  bool scan_on_boot_ = true;
+  uint32_t scan_boot_delay_ms_ = 3000;
+  std::vector<ScanCompleteTrigger*> scan_complete_triggers_;
 };
 
 class MessageTrigger : public Trigger<uint8_t, uint8_t, std::vector<uint8_t>> {
@@ -160,6 +199,19 @@ protected:
   optional<uint8_t> destination_;
   optional<uint8_t> opcode_;
   optional<std::vector<uint8_t>> data_;
+};
+
+class ScanCompleteTrigger : public Trigger<> {
+public:
+  explicit ScanCompleteTrigger(HDMICEC *parent) { parent->add_scan_complete_trigger(this); }
+};
+
+template<typename... Ts> class ScanBusAction : public Action<Ts...> {
+public:
+  ScanBusAction(HDMICEC *parent) : parent_(parent) {}
+  void play(const Ts&... x) override { parent_->start_scan(); }
+protected:
+  HDMICEC *parent_;
 };
 
 template<typename... Ts> class SendAction : public Action<Ts...> {

@@ -27,6 +27,9 @@ CONF_DESTINATION = "destination"
 CONF_OPCODE = "opcode"
 CONF_DATA = "data"
 CONF_PARENT = "parent"
+CONF_SCAN_ON_BOOT = "scan_on_boot"
+CONF_SCAN_BOOT_DELAY = "scan_boot_delay"
+CONF_ON_SCAN_COMPLETE = "on_scan_complete"
 
 DEVICE_TYPES = {
     "tv": 0x00,
@@ -68,6 +71,12 @@ MessageTrigger = hdmi_cec_ns.class_(
 SendAction = hdmi_cec_ns.class_(
     "SendAction", automation.Action
 )
+ScanBusAction = hdmi_cec_ns.class_(
+    "ScanBusAction", automation.Action
+)
+ScanCompleteTrigger = hdmi_cec_ns.class_(
+    "ScanCompleteTrigger", automation.Trigger.template()
+)
 
 def validate_address_config(config):
     has_device_type = CONF_DEVICE_TYPE in config or CONF_ADDRESS not in config
@@ -87,6 +96,13 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_MONITOR_MODE, False): cv.boolean,
             cv.Optional(CONF_DECODE_MESSAGES, True): cv.boolean,
             cv.Optional(CONF_OSD_NAME, "esphome"): validate_osd_name,
+            cv.Optional(CONF_SCAN_ON_BOOT, default=True): cv.boolean,
+            cv.Optional(CONF_SCAN_BOOT_DELAY, default="3s"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_ON_SCAN_COMPLETE): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ScanCompleteTrigger),
+                }
+            ),
             cv.Optional(CONF_ON_MESSAGE): automation.validate_automation(
                 {
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(MessageTrigger),
@@ -132,6 +148,13 @@ async def to_code(config):
     osd_name_bytes = [x for x in osd_name_bytes] # convert byte array to int array
     osd_name_bytes = cg.std_vector.template(cg.uint8)(osd_name_bytes)
     cg.add(var.set_osd_name_bytes(osd_name_bytes))
+
+    cg.add(var.set_scan_on_boot(config[CONF_SCAN_ON_BOOT]))
+    cg.add(var.set_scan_boot_delay(config[CONF_SCAN_BOOT_DELAY]))
+
+    for conf in config.get(CONF_ON_SCAN_COMPLETE, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [], conf)
 
     for conf in config.get(CONF_ON_MESSAGE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
@@ -188,3 +211,14 @@ async def send_action_to_code(config, action_id, template_args, args):
     cg.add(var.set_data(data_template_))
 
     return var
+
+@automation.register_action(
+    "hdmi_cec.scan_bus",
+    ScanBusAction,
+    {
+        cv.GenerateID(CONF_PARENT): cv.use_id(HDMICEC),
+    }
+)
+async def scan_bus_action_to_code(config, action_id, template_args, args):
+    parent = await cg.get_variable(config[CONF_PARENT])
+    return cg.new_Pvariable(action_id, template_args, parent)

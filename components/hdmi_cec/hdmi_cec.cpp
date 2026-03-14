@@ -75,6 +75,10 @@ void HDMICEC::setup() {
     negotiate_address_();
     broadcast_physical_address_();
   }
+
+  if (scan_on_boot_ && !monitor_mode_) {
+    set_timeout("scan_boot", scan_boot_delay_ms_, [this]() { start_scan(); });
+  }
 }
 
 void HDMICEC::dump_config() {
@@ -111,6 +115,9 @@ void HDMICEC::loop() {
     // recycle received frame buffer
     frames_queue_.push_front();
 
+    // Always update device registry from known response opcodes
+    update_device_registry_(src_addr, dest_addr, data);
+
     // Process on_message triggers
     bool handled_by_trigger = false;
     uint8_t opcode = data[0];
@@ -133,6 +140,17 @@ void HDMICEC::loop() {
     bool is_directly_addressed = (dest_addr != 0xF && dest_addr == address_);
     if (is_directly_addressed && !handled_by_trigger) {
       try_builtin_handler_(src_addr, dest_addr, data);
+    }
+  }
+
+  // Send one initial probe per loop iteration during scan
+  if (scanning_) {
+    for (uint8_t i = 0; i <= MAX_LOGICAL_ADDRESS; i++) {
+      if (scan_pending_[i]) {
+        scan_pending_[i] = false;
+        send(address_, i, {0x83});  // Give Physical Address
+        break;
+      }
     }
   }
 }
@@ -261,6 +279,135 @@ void HDMICEC::broadcast_physical_address_() {
   send(address_, 0xF, data);
 }
 
+// --- Bus scanning ---
+
+void HDMICEC::start_scan() {
+  if (monitor_mode_) {
+    ESP_LOGW(TAG, "Cannot scan in monitor mode");
+    return;
+  }
+  cancel_timeout("scan_complete");
+  scanning_ = true;
+  last_scan_start_ms_ = millis();
+  for (uint8_t i = 0; i <= MAX_LOGICAL_ADDRESS; i++) {
+    scan_pending_[i] = (i != address_);
+  }
+  ESP_LOGI(TAG, "Starting CEC bus scan");
+  set_timeout("scan_complete", 10000, [this]() { complete_scan_(); });
+}
+
+void HDMICEC::complete_scan_() {
+  scanning_ = false;
+  ESP_LOGI(TAG, "CEC bus scan complete");
+  for (auto *trigger : scan_complete_triggers_) {
+    trigger->trigger();
+  }
+}
+
+void HDMICEC::update_device_registry_(uint8_t src, uint8_t dest, const std::vector<uint8_t> &data) {
+  if (data.empty() || src > MAX_LOGICAL_ADDRESS) return;
+
+  auto &dev = device_registry_[src];
+  dev.last_seen_ms = millis();
+
+  uint8_t opcode = data[0];
+  switch (opcode) {
+    case 0x84:  // Report Physical Address: [0x84, phys_hi, phys_lo, dev_type]
+      if (data.size() >= 4) {
+        dev.physical_address = (uint16_t(data[1]) << 8) | data[2];
+        dev.device_type = data[3];
+        ESP_LOGD(TAG, "Device 0x%X: physical_address=%04X device_type=%d", src, dev.physical_address, dev.device_type);
+      }
+      break;
+    case 0x47:  // Set OSD Name: [0x47, name_bytes...]
+      if (data.size() >= 2) {
+        dev.osd_name = std::string(data.begin() + 1, data.end());
+        ESP_LOGD(TAG, "Device 0x%X: osd_name='%s'", src, dev.osd_name.c_str());
+      }
+      break;
+    case 0x87:  // Device Vendor ID: [0x87, v1, v2, v3]
+      if (data.size() >= 4) {
+        dev.vendor_id = (uint32_t(data[1]) << 16) | (uint32_t(data[2]) << 8) | data[3];
+        ESP_LOGD(TAG, "Device 0x%X: vendor_id=%06X", src, dev.vendor_id);
+      }
+      break;
+    case 0x90:  // Report Power Status: [0x90, status]
+      if (data.size() >= 2) {
+        dev.power_status = data[1];
+        ESP_LOGD(TAG, "Device 0x%X: power_status=%d", src, dev.power_status);
+      }
+      break;
+    case 0x9E:  // CEC Version: [0x9E, version]
+      if (data.size() >= 2) {
+        dev.cec_version = data[1];
+        ESP_LOGD(TAG, "Device 0x%X: cec_version=%d", src, dev.cec_version);
+      }
+      break;
+    case 0x82:  // Active Source: [0x82, phys_hi, phys_lo] (broadcast)
+      if (data.size() >= 3) {
+        for (auto &d : device_registry_) d.active_source = false;
+        dev.active_source = true;
+        dev.physical_address = (uint16_t(data[1]) << 8) | data[2];
+        ESP_LOGD(TAG, "Device 0x%X: active_source, physical_address=%04X", src, dev.physical_address);
+      }
+      break;
+    default:
+      return;  // not a registry-relevant opcode
+  }
+
+  // During a scan, chain the next query based on the response we just got
+  if (scanning_) {
+    switch (opcode) {
+      case 0x84: send(address_, src, {0x8C}); break;  // → Give Device Vendor ID
+      case 0x87: send(address_, src, {0x46}); break;  // → Give OSD Name
+      case 0x47: send(address_, src, {0x8F}); break;  // → Give Device Power Status
+      case 0x90: send(address_, src, {0x9F}); break;  // → Get CEC Version
+      // 0x9E: last in chain, no follow-up
+      // 0x82: passive only, no chain
+    }
+  }
+}
+
+const DeviceInfo &HDMICEC::get_device_info(uint8_t logical_address) const {
+  static const DeviceInfo EMPTY{};
+  if (logical_address > MAX_LOGICAL_ADDRESS) return EMPTY;
+  return device_registry_[logical_address];
+}
+
+bool HDMICEC::seen_on_last_scan(uint8_t logical_address) const {
+  if (logical_address > MAX_LOGICAL_ADDRESS || last_scan_start_ms_ == 0) return false;
+  return device_registry_[logical_address].last_seen_ms >= last_scan_start_ms_;
+}
+
+optional<uint8_t> HDMICEC::find_address_by_osd_name(const std::string &name) const {
+  for (uint8_t i = 0; i <= MAX_LOGICAL_ADDRESS; i++) {
+    if (device_registry_[i].last_seen_ms > 0 && device_registry_[i].osd_name == name) {
+      return i;
+    }
+  }
+  return {};
+}
+
+optional<uint8_t> HDMICEC::find_address_by_physical_address(uint16_t addr) const {
+  for (uint8_t i = 0; i <= MAX_LOGICAL_ADDRESS; i++) {
+    if (device_registry_[i].last_seen_ms > 0 && device_registry_[i].physical_address == addr) {
+      return i;
+    }
+  }
+  return {};
+}
+
+optional<uint8_t> HDMICEC::find_address_by_vendor_and_type(uint32_t vendor_id, uint8_t device_type) const {
+  for (uint8_t i = 0; i <= MAX_LOGICAL_ADDRESS; i++) {
+    if (device_registry_[i].last_seen_ms > 0 &&
+        device_registry_[i].vendor_id == vendor_id &&
+        device_registry_[i].device_type == device_type) {
+      return i;
+    }
+  }
+  return {};
+}
+
 void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data) {
   if (data.empty()) {
     return;
@@ -306,6 +453,13 @@ void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const st
 
     // Ignore "Feature Abort" opcode responses
     case 0x00:
+    // Response opcodes handled by update_device_registry_ - don't Feature Abort them
+    case 0x82:  // Active Source
+    case 0x84:  // Report Physical Address
+    case 0x47:  // Set OSD Name
+    case 0x87:  // Device Vendor ID
+    case 0x90:  // Report Power Status
+    case 0x9E:  // CEC Version
       // no-op
       break;
 
