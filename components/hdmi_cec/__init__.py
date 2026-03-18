@@ -1,10 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins, automation
-from esphome.const import (
-    CONF_ID,
-    CONF_TRIGGER_ID
-)
+from esphome.const import CONF_ID, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@Palakis"]
 
@@ -23,10 +20,12 @@ CONF_OPCODE = "opcode"
 CONF_DATA = "data"
 CONF_PARENT = "parent"
 
+
 def validate_data_array(value):
     if isinstance(value, list):
         return cv.Schema([cv.hex_uint8_t])(value)
     raise cv.Invalid("data must be a list of bytes")
+
 
 def validate_osd_name(value):
     if not isinstance(value, str):
@@ -35,7 +34,7 @@ def validate_osd_name(value):
         raise cv.Invalid("Must be a non-empty string")
     if len(value) > 14:
         raise cv.Invalid("Must not be more than 14-characters long")
-    
+
     for char in value:
         if not 0x20 <= ord(char) < 0x7E:
             raise cv.Invalid(
@@ -44,16 +43,13 @@ def validate_osd_name(value):
 
     return value
 
+
 hdmi_cec_ns = cg.esphome_ns.namespace("hdmi_cec")
-HDMICEC = hdmi_cec_ns.class_(
-    "HDMICEC", cg.Component
-)
+HDMICEC = hdmi_cec_ns.class_("HDMICEC", cg.Component)
 MessageTrigger = hdmi_cec_ns.class_(
     "MessageTrigger", automation.Trigger.template(cg.uint8, cg.uint8, cg.std_vector.template(cg.uint8))
 )
-SendAction = hdmi_cec_ns.class_(
-    "SendAction", automation.Action
-)
+SendAction = hdmi_cec_ns.class_("SendAction", automation.Action)
 
 CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
     {
@@ -71,15 +67,16 @@ CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
                 cv.Optional(CONF_SOURCE): cv.int_range(min=0, max=15),
                 cv.Optional(CONF_DESTINATION): cv.int_range(min=0, max=15),
                 cv.Optional(CONF_OPCODE): cv.uint8_t,
-                cv.Optional(CONF_DATA): validate_data_array
+                cv.Optional(CONF_DATA): validate_data_array,
             }
-        )
+        ),
     }
 )
 
+
 async def to_code(config):
     if config[CONF_DECODE_MESSAGES] == True:
-        cg.add_define('USE_CEC_DECODER')
+        cg.add_define("USE_CEC_DECODER")
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
@@ -92,8 +89,8 @@ async def to_code(config):
     cg.add(var.set_promiscuous_mode(config[CONF_PROMISCUOUS_MODE]))
     cg.add(var.set_monitor_mode(config[CONF_MONITOR_MODE]))
 
-    osd_name_bytes = bytes(config[CONF_OSD_NAME], 'ascii', 'ignore') # convert string to ascii bytes
-    osd_name_bytes = [x for x in osd_name_bytes] # convert byte array to int array
+    osd_name_bytes = bytes(config[CONF_OSD_NAME], "ascii", "ignore")  # convert string to ascii bytes
+    osd_name_bytes = [x for x in osd_name_bytes]  # convert byte array to int array
     osd_name_bytes = cg.std_vector.template(cg.uint8)(osd_name_bytes)
     cg.add(var.set_osd_name_bytes(osd_name_bytes))
 
@@ -117,14 +114,9 @@ async def to_code(config):
             cg.add(trigger.set_data(data))
 
         await automation.build_automation(
-            trigger,
-            [
-                (cg.uint8, "source"),
-                (cg.uint8, "destination"),
-                (cg.std_vector.template(cg.uint8), "data")
-            ],
-            conf
+            trigger, [(cg.uint8, "source"), (cg.uint8, "destination"), (cg.std_vector.template(cg.uint8), "data")], conf
         )
+
 
 @automation.register_action(
     "hdmi_cec.send",
@@ -133,8 +125,8 @@ async def to_code(config):
         cv.GenerateID(CONF_PARENT): cv.use_id(HDMICEC),
         cv.Optional(CONF_SOURCE): cv.templatable(cv.int_range(min=0, max=15)),
         cv.Required(CONF_DESTINATION): cv.templatable(cv.int_range(min=0, max=15)),
-        cv.Required(CONF_DATA): cv.templatable(validate_data_array)
-    }
+        cv.Required(CONF_DATA): cv.templatable(validate_data_array),
+    },
 )
 async def send_action_to_code(config, action_id, template_args, args):
     parent = await cg.get_variable(config[CONF_PARENT])

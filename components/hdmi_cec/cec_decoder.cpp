@@ -1,12 +1,12 @@
+#include "cec_decoder.h"
+
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <map>
-#include <array>
-#include <cstdio>
 
 #include "hdmi_cec.h"
-#include "cec_decoder.h"
 
 namespace esphome {
 namespace hdmi_cec {
@@ -224,7 +224,7 @@ template<> bool Decoder::do_operand<Decoder::PhysicalAddress>() {
   }
   char line[12];
   std::sprintf(line, "%1x.%1x.%1x.%1x", (frame_[offset_] >> 4) & 0xF, frame_[offset_] & 0xF,
-    (frame_[offset_ + 1] >> 4) & 0xF, frame_[offset_ + 1] & 0xF);
+               (frame_[offset_ + 1] >> 4) & 0xF, frame_[offset_ + 1] & 0xF);
   return append_operand(line, 2);
 }
 
@@ -405,10 +405,11 @@ const std::map<uint32_t, const char *> Decoder::vendor_ids = {
     {0x534850, "Sharp"},   {0x6B746D, "Vizio"},       {0x8065E9, "Benq"},          {0x9C645E, "Harman Kardon"}};
 
 std::string Decoder::address_decode() const {
-  const static std::array<const char *, 16> names = { "TV", "RecordingDev1", "RecordingDev2", "Tuner1",
-    "PlaybackDev1", "AudioSystem", "Tuner2", "Tuner3", "PlaybackDev2", "RecordingDev3",
-    "Tuner4", "PlaybackDev3", "Reserved", "Reserved", "SpecificUse", "Unregistered"};
-  const char* dest = (frame_.is_broadcast()) ? "All" : names[frame_.destination_addr()];
+  const static std::array<const char *, 16> names = {"TV",           "RecordingDev1", "RecordingDev2", "Tuner1",
+                                                     "PlaybackDev1", "AudioSystem",   "Tuner2",        "Tuner3",
+                                                     "PlaybackDev2", "RecordingDev3", "Tuner4",        "PlaybackDev3",
+                                                     "Reserved",     "Reserved",      "SpecificUse",   "Unregistered"};
+  const char *dest = (frame_.is_broadcast()) ? "All" : names[frame_.destination_addr()];
   return std::string(names[frame_.initiator_addr()]) + " to " + dest + ": ";
 }
 
@@ -420,15 +421,15 @@ const char *Decoder::find_opcode_name(uint32_t opcode) const {
   return it->second.name;
 }
 
-  /**
-   * Helper function to implement the 'do_operand' methods, to gather a textual representation.
-   * @return true if a further operand can be decoded, false otherwise
-   */
-  bool Decoder::append_operand(const char *word, uint8_t offset_incr /* default 1 */) {
-    length_ += snprintf(&line_[length_], (line_.size() - length_), "[%s]", word);
-    offset_ += offset_incr;
-    return (length_ < line_.size()) && (offset_ < frame_.size());
-  }
+/**
+ * Helper function to implement the 'do_operand' methods, to gather a textual representation.
+ * @return true if a further operand can be decoded, false otherwise
+ */
+bool Decoder::append_operand(const char *word, uint8_t offset_incr /* default 1 */) {
+  length_ += snprintf(&line_[length_], (line_.size() - length_), "[%s]", word);
+  offset_ += offset_incr;
+  return (length_ < line_.size()) && (offset_ < frame_.size());
+}
 
 /**
  * Entry function 'decode' to call for full decode of a CEC frame
@@ -450,9 +451,9 @@ std::string Decoder::decode() {
 
   result += std::string("<") + it->second.name + ">";
   // operand fields
-  length_ = 0;  // currently accumulated length of text of operands
+  length_ = 0;         // currently accumulated length of text of operands
   line_[length_] = 0;  // initialise operand text to empty string
-  offset_ = 2;  // location in frame of first operand to decode
+  offset_ = 2;         // location in frame of first operand to decode
   OperandDecode_f f = it->second.decode_f;
   (this->*f)();
   result += &line_[0];

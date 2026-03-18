@@ -1,4 +1,5 @@
 #include "hdmi_cec.h"
+
 #include "esphome/core/log.h"
 
 #ifdef USE_CEC_DECODER
@@ -55,9 +56,7 @@ std::string Frame::to_string(bool skip_decode) const {
   return result;
 }
 
-inline void IRAM_ATTR HDMICEC::set_pin_input_high() {
-  pin_->pin_mode(INPUT_MODE_FLAGS);
-}
+inline void IRAM_ATTR HDMICEC::set_pin_input_high() { pin_->pin_mode(INPUT_MODE_FLAGS); }
 
 inline void IRAM_ATTR HDMICEC::set_pin_output_low() {
   pin_->pin_mode(OUTPUT_MODE_FLAGS);
@@ -65,7 +64,7 @@ inline void IRAM_ATTR HDMICEC::set_pin_output_low() {
 }
 
 void HDMICEC::setup() {
-  this->pin_->setup();  
+  this->pin_->setup();
   isr_pin_ = pin_->to_isr();
   frames_queue_.reset();
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
@@ -110,14 +109,12 @@ void HDMICEC::loop() {
     bool handled_by_trigger = false;
     uint8_t opcode = data[0];
     for (auto trigger : message_triggers_) {
-      bool can_trigger = (
-        (!trigger->source_.has_value()      || (trigger->source_ == src_addr)) &&
-        (!trigger->destination_.has_value() || (trigger->destination_ == dest_addr)) &&
-        (!trigger->opcode_.has_value()      || (trigger->opcode_ == opcode)) &&
-        (!trigger->data_.has_value() ||
-          (data.size() == trigger->data_->size() && std::equal(trigger->data_->begin(), trigger->data_->end(), data.begin()))
-        )
-      );
+      bool can_trigger =
+          ((!trigger->source_.has_value() || (trigger->source_ == src_addr)) &&
+           (!trigger->destination_.has_value() || (trigger->destination_ == dest_addr)) &&
+           (!trigger->opcode_.has_value() || (trigger->opcode_ == opcode)) &&
+           (!trigger->data_.has_value() || (data.size() == trigger->data_->size() &&
+                                            std::equal(trigger->data_->begin(), trigger->data_->end(), data.begin()))));
       if (can_trigger) {
         trigger->trigger(src_addr, dest_addr, data);
         handled_by_trigger = true;
@@ -136,11 +133,11 @@ uint8_t logical_address_to_device_type(uint8_t logical_address) {
   switch (logical_address) {
     // "TV"
     case 0x0:
-      return 0x00; // "TV"
+      return 0x00;  // "TV"
 
     // "Audio System"
     case 0x5:
-      return 0x05; // "Audio System"
+      return 0x05;  // "Audio System"
 
     // "Recording 1"
     case 0x1:
@@ -148,7 +145,7 @@ uint8_t logical_address_to_device_type(uint8_t logical_address) {
     case 0x2:
     // "Recording 3"
     case 0x9:
-      return 0x01; // "Recording Device"
+      return 0x01;  // "Recording Device"
 
     // "Tuner 1"
     case 0x3:
@@ -158,10 +155,10 @@ uint8_t logical_address_to_device_type(uint8_t logical_address) {
     case 0x7:
     // "Tuner 4"
     case 0xA:
-      return 0x03; // "Tuner"
+      return 0x03;  // "Tuner"
 
     default:
-      return 0x04; // "Playback Device"
+      return 0x04;  // "Playback Device"
   }
 }
 
@@ -182,14 +179,14 @@ void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const st
     // "Give Device Power Status" request
     case 0x8F: {
       // reply with "Report Power Status" (0x90)
-      send(address_, source, {0x90, 0x00}); // "On"
+      send(address_, source, {0x90, 0x00});  // "On"
       break;
     }
 
     // "Give OSD Name" request
     case 0x46: {
       // reply with "Set OSD Name" (0x47)
-      std::vector<uint8_t> data = { 0x47 };
+      std::vector<uint8_t> data = {0x47};
       data.insert(data.end(), osd_name_bytes_.begin(), osd_name_bytes_.end());
       send(address_, source, data);
       break;
@@ -199,7 +196,7 @@ void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const st
     case 0x83: {
       // reply with "Report Physical Address" (0x84)
       auto physical_address_bytes = decode_value(physical_address_);
-      std::vector<uint8_t> data = { 0x84 };
+      std::vector<uint8_t> data = {0x84};
       data.insert(data.end(), physical_address_bytes.begin(), physical_address_bytes.end());
       // Device Type
       data.push_back(logical_address_to_device_type(address_));
@@ -221,7 +218,8 @@ void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const st
 }
 
 bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes) {
-  if (monitor_mode_) return false;
+  if (monitor_mode_)
+    return false;
 
   bool is_broadcast = (destination == 0xF);
 
@@ -239,10 +237,12 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
     for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
       int32_t delay = 0;
-      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros()) > 0) {
+      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros()) >
+             0) {
         ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
         delay_microseconds_safe(delay);
-        // Note: during this delay, the 'last_falling_edge_us_' might be incremented by 'gpio_intr_', requiring further wait
+        // Note: during this delay, the 'last_falling_edge_us_' might be incremented by 'gpio_intr_', requiring further
+        // wait
         free_bit_periods = 5;
       }
       ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
@@ -410,14 +410,14 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
   }
 
   bool value = (pulse_duration >= HIGH_BIT_MIN_US && pulse_duration <= HIGH_BIT_MAX_US);
-  
+
   switch (self->receiver_state_) {
     case ReceiverState::ReceivingByte: {
       // write bit to the current byte
       self->recv_byte_buffer_ = (self->recv_byte_buffer_ << 1) | (value & 0b1);
 
       self->recv_bit_counter_++;
-      if (self->recv_bit_counter_ >= 8) { 
+      if (self->recv_bit_counter_ >= 8) {
         // if we reached eight bits, push the current byte to the frame buffer
         if (self->frame_receive_) {
           self->frame_receive_->push_back(self->recv_byte_buffer_);
@@ -450,11 +450,7 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
         reset_state_variables_(self);
       }
 
-      self->receiver_state_ = (
-        isEOM
-        ? ReceiverState::WaitingForEOMAck
-        : ReceiverState::WaitingForAck
-      );
+      self->receiver_state_ = (isEOM ? ReceiverState::WaitingForEOMAck : ReceiverState::WaitingForAck);
       break;
     }
 
@@ -479,5 +475,5 @@ void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_byte_buffer_ = 0x0;
 }
 
-}
-}
+}  // namespace hdmi_cec
+}  // namespace esphome

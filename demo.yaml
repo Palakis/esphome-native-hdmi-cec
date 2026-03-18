@@ -8,6 +8,8 @@ external_components:
 
 esp32:
   board: esp32dev
+  framework:
+    type: esp-idf
 
 # Enable logging
 logger:

@@ -1,10 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <map>
-#include <array>
 
 #include "hdmi_cec.h"
 
