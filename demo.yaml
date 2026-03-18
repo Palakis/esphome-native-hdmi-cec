@@ -18,7 +18,7 @@ logger:
 api:
   encryption:
     key: !secret encryption_key
-  # Enable CEC services (send, etc.) in Home Assistant
+  # Enable CEC services (send, scan_bus, etc.) in Home Assistant
   custom_services: true
 
 # Enable OTA
@@ -37,8 +37,14 @@ wifi:
 captive_portal:
 
 hdmi_cec:
+  id: cec
   pin: GPIO26
   physical_address: 0x4000
+  scan_on_boot: true
+  scan_boot_delay: 3s
+  on_scan_complete:
+    - then:
+        - logger.log: "CEC bus scan complete"
   on_message:
     # Volume Up
     - data: [0x44, 0x41]

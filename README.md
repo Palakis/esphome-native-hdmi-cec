@@ -17,6 +17,12 @@ Make your ESPHome devices speak the (machine) language of your living room with 
       - _"Give OSD Name"_
 - Send CEC commands
     - Built-in `hdmi_cec.send` action
+- Bus scanning & device discovery
+    - Automatic scan on startup with configurable delay
+    - On-demand scanning via `hdmi_cec.scan_bus` action
+    - Device registry with OSD name, physical address, vendor ID, power status, and more
+    - Query devices by logical address, OSD name, physical address, or vendor/type
+    - Passive registry updates from broadcast messages
 
 ### To-do list
 
@@ -108,6 +114,7 @@ The component automatically creates the following Home Assistant entities. No co
 | Entity | Type | Category | Description |
 | ------ | ---- | -------- | ----------- |
 | Logical Address | Text sensor | Diagnostic | The CEC logical address negotiated at startup (e.g. `0x4`) |
+| Scan CEC Bus | Button | Diagnostic | Triggers an on-demand scan of the CEC bus |
 
 **Customization example:**
 
@@ -117,6 +124,8 @@ hdmi_cec:
   logical_address:
     name: "CEC Address"
     icon: "mdi:hdmi-port"
+  scan_bus:
+    name: "Rescan CEC Devices"
 ```
 
 ---
@@ -187,7 +196,20 @@ api:
   custom_services: true
 ```
 
-This exposes the `esphome.<node>_send` service with `destination` (int) and `data` (int[]) parameters.
+This exposes the following services:
+
+| Service | Parameters | Description |
+|---------|-----------|-------------|
+| `esphome.<node>_send` | `destination` (int), `data` (int[]) | Send a raw CEC command |
+| `esphome.<node>_send_to_osd_name` | `osd_name` (string), `data` (int[]) | Send to a device by its OSD name |
+| `esphome.<node>_send_to_physical_address` | `physical_address` (int), `data` (int[]) | Send to a device by physical address |
+| `esphome.<node>_send_to_vendor_and_type` | `vendor_id` (int), `device_type` (int), `data` (int[]) | Send to a device by vendor ID and type |
+| `esphome.<node>_scan_bus` | _(none)_ | Trigger a CEC bus scan |
+
+Note that logical addresses are **subject to change** and so the send_to_* variants are more stable options, depending on your devices and needs:
+- OSD name is stable, if the device provides it, and as long as it isn't changed by device settings.
+- Phyiscal address is based on the phyiscal ports that your devices are plugged into. It is stable if and only if you leave devices you care about plugged into the same ports.
+- Vendor ID + Device Type is always stable, assuming you only have one matching device in your HDMI tree.
 
 **Example HA service call** (Developer Tools > Services):
 
@@ -285,6 +307,87 @@ hdmi_cec:
 
 ---
 
+### 6. Bus Scanning & Device Discovery
+
+The component can scan the CEC bus to discover connected devices and collect their information. Scanning is non-blocking and runs asynchronously in the background.
+
+#### Configuration
+
+```yaml
+hdmi_cec:
+  id: cec
+  pin: GPIO26
+  physical_address: 0x4000
+  device_type: playback_device
+
+  # Scan the bus on startup (default: true)
+  scan_on_boot: true
+
+  # Delay before the initial scan, to let other devices finish negotiation (default: 3s)
+  scan_boot_delay: 3s
+
+  # Trigger when a scan completes
+  on_scan_complete:
+    - then:
+        - logger.log: "CEC bus scan complete"
+```
+
+Scan results are logged at INFO level. To expose device state as entities in Home Assistant, see "User-Defined CEC Devices" below.
+
+#### Triggering a scan manually
+
+Use the `hdmi_cec.scan_bus` action from any automation:
+
+```yaml
+button:
+  - platform: template
+    name: "Scan CEC Bus"
+    on_press:
+      - hdmi_cec.scan_bus
+```
+
+#### Querying the device registry from lambdas
+
+The scan populates a per-device registry (logical addresses 0-14) with the following fields:
+
+| Field | Type | Default (unknown) | Source |
+|-------|------|--------------------|--------|
+| `device_type` | `uint8_t` | `0xFF` | Report Physical Address |
+| `physical_address` | `uint16_t` | `0xFFFF` | Report Physical Address |
+| `osd_name` | `std::string` | `""` | Set OSD Name |
+| `vendor_id` | `uint32_t` | `0xFFFFFF` | Device Vendor ID |
+| `power_status` | `uint8_t` | `0xFF` | Report Power Status |
+| `cec_version` | `uint8_t` | `0xFF` | CEC Version |
+| `active_source` | `bool` | `false` | Active Source broadcast |
+| `last_seen_ms` | `uint32_t` | `0` | Any response from device |
+
+Available query methods:
+
+```cpp
+// Get info for a specific logical address
+auto &dev = id(cec).get_device(0);  // TV is usually address 0
+
+// Check if a device was seen on the most recent scan
+bool tv_present = id(cec).seen_on_last_scan(0);
+
+// Find a device by OSD name
+auto addr = id(cec).find_address_by_osd_name("Samsung TV");
+if (addr.has_value()) { /* use *addr */ }
+
+// Find a device by physical address
+auto addr = id(cec).find_address_by_physical_address(0x1000);
+
+// Find a device by vendor ID and device type (useful for devices without OSD names)
+auto addr = id(cec).find_address_by_vendor_and_type(0x000678, 0x04);  // e.g., Panasonic playback device
+
+// Check if a scan is currently running
+bool scanning = id(cec).is_scanning();
+```
+
+The registry is also updated passively from broadcast messages (Report Physical Address, Device Vendor ID, Active Source) even outside of active scans.
+
+---
+
 ## Advanced Example (All Features Combined)
 
 Here’s a full YAML snippet that includes all optional features together (just delete what you don't need):
@@ -306,7 +409,7 @@ logger:
 api:
   encryption:
     key: "..."
-  # Enable CEC services (send, etc.) in Home Assistant
+  # Enable CEC services (send, scan_bus, etc.) in Home Assistant
   custom_services: true
 
 ota:

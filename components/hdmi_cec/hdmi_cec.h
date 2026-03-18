@@ -2,8 +2,10 @@
 
 #include <array>
 #include <atomic>
+#include <string>
 #include <vector>
 
+#include "esphome/components/button/button.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
@@ -32,6 +34,7 @@ enum CecLogicalAddress : uint8_t {
   CEC_ADDR_RESERVED_1 = 0xC,
   CEC_ADDR_RESERVED_2 = 0xD,
   CEC_ADDR_FREE_USE = 0xE,
+  CEC_ADDR_MAX_ASSIGNABLE = 0xE,
   CEC_ADDR_BROADCAST = 0xF,
 };
 
@@ -39,8 +42,11 @@ enum CecOpcode : uint8_t {
   CEC_OPCODE_FEATURE_ABORT = 0x00,
   CEC_OPCODE_GIVE_OSD_NAME = 0x46,
   CEC_OPCODE_SET_OSD_NAME = 0x47,
+  CEC_OPCODE_ACTIVE_SOURCE = 0x82,
   CEC_OPCODE_GIVE_PHYSICAL_ADDRESS = 0x83,
   CEC_OPCODE_REPORT_PHYSICAL_ADDRESS = 0x84,
+  CEC_OPCODE_DEVICE_VENDOR_ID = 0x87,
+  CEC_OPCODE_GIVE_DEVICE_VENDOR_ID = 0x8C,
   CEC_OPCODE_GIVE_DEVICE_POWER_STATUS = 0x8F,
   CEC_OPCODE_REPORT_POWER_STATUS = 0x90,
   CEC_OPCODE_CEC_VERSION = 0x9E,
@@ -159,7 +165,28 @@ template<unsigned int SIZE> class FrameRingBuffer {
   std::array<Frame *, SIZE + 1> store_;
 };
 
+class CECDevice {
+ public:
+  uint8_t logical_address = 0xFF;
+  uint8_t device_type = 0xFF;
+  uint16_t physical_address = 0xFFFF;
+  std::string osd_name;
+  uint32_t vendor_id = 0xFFFFFF;
+  uint8_t power_status = 0xFF;
+  uint8_t cec_version = 0xFF;
+  bool active_source = false;
+  uint32_t last_seen_ms = 0;
+
+  static std::string device_type_to_string(uint8_t type);
+  static std::string physical_address_to_string(uint16_t addr);
+  static std::string vendor_id_to_string(uint32_t id);
+  static std::string vendor_name_to_string(uint32_t id);
+  static std::string cec_version_to_string(uint8_t version);
+  static std::string power_status_to_string(uint8_t status);
+};
+
 class MessageTrigger;
+class ScanCompleteTrigger;
 
 class HDMICEC : public Component
 #ifdef USE_API_CUSTOM_SERVICES
@@ -181,8 +208,27 @@ class HDMICEC : public Component
   }
   void add_message_trigger(MessageTrigger *trigger) { message_triggers_.push_back(trigger); }
   void set_address_sensor(text_sensor::TextSensor *sensor) { address_sensor_ = sensor; }
+  void set_active_source_sensor(text_sensor::TextSensor *sensor) { active_source_sensor_ = sensor; }
+  void add_scan_complete_trigger(ScanCompleteTrigger *trigger) { scan_complete_triggers_.push_back(trigger); }
 
   bool send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes);
+  bool send_to_osd_name(uint8_t source, const std::string &name, const std::vector<uint8_t> &data);
+  bool send_to_physical_address(uint8_t source, uint16_t phys_addr, const std::vector<uint8_t> &data);
+  bool send_to_vendor_and_type(uint8_t source, uint32_t vendor_id, uint8_t device_type,
+                               const std::vector<uint8_t> &data);
+
+  // Bus scanning
+  void start_scan();
+  bool is_scanning() const { return scanning_; }
+  void set_scan_on_boot(bool val) { scan_on_boot_ = val; }
+  void set_scan_boot_delay(uint32_t ms) { scan_boot_delay_ms_ = ms; }
+
+  // Device registry queries
+  const CECDevice &get_device(uint8_t logical_address) const;
+  bool seen_on_last_scan(uint8_t logical_address) const;
+  optional<uint8_t> find_address_by_osd_name(const std::string &name) const;
+  optional<uint8_t> find_address_by_physical_address(uint16_t addr) const;
+  optional<uint8_t> find_address_by_vendor_and_type(uint32_t vendor_id, uint8_t device_type) const;
 
   // Component overrides
   float get_setup_priority() { return esphome::setup_priority::HARDWARE; }
@@ -197,6 +243,8 @@ class HDMICEC : public Component
   bool test_address_available_(uint8_t candidate_address);
   void negotiate_address_();
   void broadcast_physical_address_();
+  void complete_scan_();
+  void update_devices_(uint8_t src, uint8_t dest, const std::vector<uint8_t> &data);
   SendResult send_frame_(const Frame &frame, bool is_broadcast);
   bool send_start_bit_();
   void send_bit_(bool bit_value);
@@ -216,6 +264,7 @@ class HDMICEC : public Component
   std::vector<uint8_t> osd_name_bytes_;
   std::vector<MessageTrigger *> message_triggers_;
   text_sensor::TextSensor *address_sensor_{nullptr};
+  text_sensor::TextSensor *active_source_sensor_{nullptr};
 
   bool last_level_ = true;             // cec line level on last isr call
   uint32_t last_falling_edge_us_ = 0;  // timepoint in received message
@@ -228,8 +277,21 @@ class HDMICEC : public Component
   bool recv_ack_queued_ = false;
   Mutex send_mutex_;
 
+  // Device registry and scanning
+  std::array<CECDevice, CEC_ADDR_MAX_ASSIGNABLE + 1> devices_;
+  bool scanning_ = false;
+  std::array<bool, CEC_ADDR_MAX_ASSIGNABLE + 1> scan_pending_ = {};
+  uint32_t last_scan_start_ms_ = 0;
+  bool scan_on_boot_ = true;
+  uint32_t scan_boot_delay_ms_ = 3000;
+  std::vector<ScanCompleteTrigger *> scan_complete_triggers_;
+
 #ifdef USE_API_CUSTOM_SERVICES
   void on_send_(int32_t destination, std::vector<int32_t> data);
+  void on_send_to_osd_name_(std::string osd_name, std::vector<int32_t> data);
+  void on_send_to_physical_address_(int32_t physical_address, std::vector<int32_t> data);
+  void on_send_to_vendor_and_type_(int32_t vendor_id, int32_t device_type, std::vector<int32_t> data);
+  void on_scan_bus_();
 #endif
 };
 
@@ -250,6 +312,29 @@ class MessageTrigger : public Trigger<uint8_t, uint8_t, std::vector<uint8_t>> {
   optional<std::vector<uint8_t>> data_;
 };
 
+class ScanCompleteTrigger : public Trigger<> {
+ public:
+  explicit ScanCompleteTrigger(HDMICEC *parent) { parent->add_scan_complete_trigger(this); }
+};
+
+class ScanButton : public button::Button {
+ public:
+  void set_parent(HDMICEC *parent) { parent_ = parent; }
+
+ protected:
+  void press_action() override { parent_->start_scan(); }
+  HDMICEC *parent_;
+};
+
+template<typename... Ts> class ScanBusAction : public Action<Ts...> {
+ public:
+  ScanBusAction(HDMICEC *parent) : parent_(parent) {}
+  void play(const Ts &...x) override { parent_->start_scan(); }
+
+ protected:
+  HDMICEC *parent_;
+};
+
 template<typename... Ts> class SendAction : public Action<Ts...> {
  public:
   SendAction(HDMICEC *parent) : parent_(parent) {}
@@ -262,6 +347,56 @@ template<typename... Ts> class SendAction : public Action<Ts...> {
     auto destination_address = destination_.value(x...);
     auto data = data_.value(x...);
     parent_->send(source_address, destination_address, data);
+  }
+
+ protected:
+  HDMICEC *parent_;
+};
+
+template<typename... Ts> class SendToOsdNameAction : public Action<Ts...> {
+ public:
+  SendToOsdNameAction(HDMICEC *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(uint8_t, source)
+  TEMPLATABLE_VALUE(std::string, osd_name)
+  TEMPLATABLE_VALUE(std::vector<uint8_t>, data)
+
+  void play(const Ts &...x) override {
+    auto source_address = source_.has_value() ? source_.value(x...) : parent_->address();
+    parent_->send_to_osd_name(source_address, osd_name_.value(x...), data_.value(x...));
+  }
+
+ protected:
+  HDMICEC *parent_;
+};
+
+template<typename... Ts> class SendToPhysicalAddressAction : public Action<Ts...> {
+ public:
+  SendToPhysicalAddressAction(HDMICEC *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(uint8_t, source)
+  TEMPLATABLE_VALUE(uint16_t, physical_address)
+  TEMPLATABLE_VALUE(std::vector<uint8_t>, data)
+
+  void play(const Ts &...x) override {
+    auto source_address = source_.has_value() ? source_.value(x...) : parent_->address();
+    parent_->send_to_physical_address(source_address, physical_address_.value(x...), data_.value(x...));
+  }
+
+ protected:
+  HDMICEC *parent_;
+};
+
+template<typename... Ts> class SendToVendorAndTypeAction : public Action<Ts...> {
+ public:
+  SendToVendorAndTypeAction(HDMICEC *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(uint8_t, source)
+  TEMPLATABLE_VALUE(uint32_t, vendor_id)
+  TEMPLATABLE_VALUE(uint8_t, device_type)
+  TEMPLATABLE_VALUE(std::vector<uint8_t>, data)
+
+  void play(const Ts &...x) override {
+    auto source_address = source_.has_value() ? source_.value(x...) : parent_->address();
+    parent_->send_to_vendor_and_type(source_address, vendor_id_.value(x...), device_type_.value(x...),
+                                     data_.value(x...));
   }
 
  protected:
