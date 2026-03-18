@@ -391,13 +391,15 @@ const Decoder::CecOpcodeTable Decoder::cec_opcode_table = {
     {0xF8, {"CDC Message", &Decoder::do_operand<None>}}};
 
 const std::map<uint32_t, const char *> Decoder::vendor_ids = {
-    {0x000039, "Toshiba"}, {0x0000F0, "Samsung"},     {0x0005CD, "Denon"},         {0x000678, "Marantz"},
-    {0x000982, "Loewe"},   {0x0009B0, "Onkyo"},       {0x000CB8, "Medion"},        {0x000CE7, "Toshiba"},
-    {0x0010FA, "Apple"},   {0x001582, "Pulse Eight"}, {0x001950, "Harman Kardon"}, {0x001A11, "Google"},
-    {0x0020C7, "Akai"},    {0x002467, "AOC"},         {0x008045, "Panasonic"},     {0x00903E, "Philips"},
-    {0x009053, "Daewoo"},  {0x00A0DE, "Yamaha"},      {0x00D0D5, "Grundig"},       {0x00E036, "Pioneer"},
-    {0x00E091, "LG"},      {0x08001F, "Sharp"},       {0x080046, "Sony"},          {0x18C086, "Broadcom"},
-    {0x534850, "Sharp"},   {0x6B746D, "Vizio"},       {0x8065E9, "BenQ"},          {0x9C645E, "Harman Kardon"}};
+    {0x000039, "Toshiba"},       {0x0000F0, "Samsung"},       {0x00044B, "NVIDIA"}, {0x0005CD, "Denon"},
+    {0x000678, "Marantz"},       {0x000982, "Loewe"},         {0x0009B0, "Onkyo"},  {0x000CB8, "Medion"},
+    {0x000CE7, "Toshiba"},       {0x000D4B, "Roku"},          {0x0010FA, "Apple"},  {0x001582, "Pulse Eight"},
+    {0x001950, "Harman Kardon"}, {0x001A11, "Google"},        {0x0020C7, "Akai"},   {0x002467, "AOC"},
+    {0x008045, "Panasonic"},     {0x00903E, "Philips"},       {0x009053, "Daewoo"}, {0x00A0DE, "Yamaha"},
+    {0x00D0D5, "Grundig"},       {0x00E036, "Pioneer"},       {0x00E091, "LG"},     {0x08001F, "Sharp"},
+    {0x080046, "Sony"},          {0x18C086, "Broadcom"},      {0x534850, "Sharp"},  {0x6B746D, "Vizio"},
+    {0x8065E9, "BenQ"},          {0x9C645E, "Harman Kardon"},
+};
 
 std::string Decoder::address_decode() const {
   const static std::array<const char *, 16> names = {"TV",           "RecordingDev1", "RecordingDev2", "Tuner1",
