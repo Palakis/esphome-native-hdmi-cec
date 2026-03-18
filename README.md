@@ -388,6 +388,115 @@ The registry is also updated passively from broadcast messages (Report Physical 
 
 ---
 
+### 7. User-Defined CEC Devices
+
+Define specific CEC devices you want to interact with under `devices:`. Each device becomes an ESPHome sub-device with its own entity group in Home Assistant. Only the entities you configure are created, keeping memory usage low.
+
+All entity keys below are optional. A bare key (e.g. `power_switch:`) creates the entity with a default name of `"{device name} {label}"` — Home Assistant strips the device name prefix when displaying under the sub-device card, so `"Blu-ray Player Power"` shows as **Power**.
+
+#### Example
+
+```yaml
+hdmi_cec:
+  id: cec
+  pin: GPIO26
+  physical_address: 0x4000
+  scan_on_boot: true
+
+  devices:
+    - id: bluray
+      name: "Blu-ray Player"
+      match:
+        osd_name: "BD Player"
+        vendor_id: 0x080046
+      power_switch:
+        name: "BD Power"
+        icon: "mdi:disc-player"
+      power_status_sensor:
+        name: "BD Status"
+        icon: "mdi:power-settings"
+      active_source_sensor:
+      navigation_buttons:
+      transport_buttons:
+
+    - id: soundbar
+      name: "Soundbar"
+      match:
+        vendor_id: 0x0000F0
+        device_type: audio_system
+      power_switch:
+      volume_buttons:
+```
+
+#### Device matching
+
+Each device requires a `match:` block with at least one criterion. All criteria are AND-combined. After a bus scan (or from ongoing CEC traffic), the component resolves each device to its current logical address.
+
+| Key | Type | Description | Stability | Uniqueness |
+|-----|------|-------------|-----------|------------|
+| `osd_name` | string | Match by the device's on-screen display name | As long as it's not changed in device settings (if applicable.) Not reported by all devices. | Maybe? |
+| `vendor_id` | int | Match by 24-bit vendor ID (e.g. `0x080046`) | Never changes | Depends on your devices |
+| `device_type` | enum | Match by device type: `tv`, `recording_device`, `tuner`, `playback_device`, `audio_system`, `other` | Never changes | Depends on your devices |
+| `physical_address` | int | Match by 16-bit HDMI topology address (e.g. `0x2000`) | Changes if/when you move it to a different plug | Always unquie |
+
+#### Power switch
+
+Sends Image View On (power on) or Standby (power off). Use a bare key for defaults, or customize with any options from [Switch](https://esphome.io/components/switch/).
+
+#### Sensors
+
+Each sensor key can be a bare key or customized with standard options.
+
+| Key | Type | Default label | Description |
+|-----|------|---------------|-------------|
+| `osd_name_sensor` | Text | OSD Name | Device's on-screen display name |
+| `device_type_sensor` | Text | Device Type | TV, Playback Device, Audio System, etc. |
+| `vendor_id_sensor` | Text | Vendor ID | Hex string (e.g. "0x080046") |
+| `vendor_name_sensor` | Text | Vendor Name | Manufacturer (e.g. "Sony") |
+| `physical_address_sensor` | Text | Physical Address | HDMI topology address (e.g. "2.0.0.0") |
+| `power_status_sensor` | Text | Power Status | On / Standby / Transitioning |
+| `cec_version_sensor` | Text | CEC Version | Protocol version string |
+| `active_source_sensor` | Binary | Active Source | Whether this device is the active HDMI source |
+| `last_seen_sensor` | Text | Last Seen | Time since last bus activity |
+
+All other options from [Text Sensor](https://esphome.io/components/text_sensor/) or [Binary Sensor](https://esphome.io/components/binary_sensor/) depending on the type above.
+
+#### Button groups
+
+Each key creates a group of [Button](https://esphome.io/components/button/) entities that send CEC User Control Pressed + Released commands to the device. These are bare keys only — they take no sub-options. Individual button names and icons are auto-generated.
+
+| Key | Buttons created |
+|-----|-----------------|
+| `navigation_buttons` | Select, Up, Down, Left, Right, Root Menu, Back |
+| `transport_buttons` | Play, Stop, Pause, Record, Rewind, Fast Forward, Play/Pause |
+| `volume_buttons` | Volume Up, Volume Down, Mute |
+| `power_buttons` | Power Toggle, Power Off, Power On |
+| `number_buttons` | 0–9, Dot, Enter, Clear, Number Entry Mode, 11, 12 |
+| `channel_buttons` | Channel Up, Channel Down, Previous Channel |
+| `color_buttons` | Blue, Red, Green, Yellow |
+
+#### Sending to a device by ID
+
+Use the `hdmi_cec.send_to_device` action to send raw CEC data to a user-defined device. The device's logical address is resolved automatically from the match criteria.
+
+```yaml
+on_...:
+  then:
+    - hdmi_cec.send_to_device:
+        device: bluray
+        data: [0x44, 0x00]  # User Control Pressed: Select
+```
+
+Each device also gets an automatic Home Assistant service: `esphome.<node>_send_to_device_<id>` with a single `data` (int[]) parameter. For example, with `id: bluray`:
+
+```yaml
+service: esphome.hdmi_cec_bridge_send_to_device_bluray
+data:
+  data: [0x44, 0x00]  # User Control Pressed: Select
+```
+
+---
+
 ## Advanced Example (All Features Combined)
 
 Here’s a full YAML snippet that includes all optional features together (just delete what you don't need):
