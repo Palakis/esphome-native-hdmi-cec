@@ -18,17 +18,8 @@ logger:
 api:
   encryption:
     key: !secret encryption_key
-  services:
-    - service: hdmi_cec_send
-      variables:
-        cec_source: int
-        cec_destination: int
-        cec_data: int[]
-      then:
-        - hdmi_cec.send:
-            source: !lambda "return static_cast<unsigned char>(cec_source);"
-            destination: !lambda "return static_cast<unsigned char>(cec_destination);"
-            data: !lambda "std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;"
+  # Enable CEC services (send, etc.) in Home Assistant
+  custom_services: true
 
 # Enable OTA
 ota:

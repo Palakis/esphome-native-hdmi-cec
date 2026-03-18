@@ -8,6 +8,10 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 
+#ifdef USE_API_CUSTOM_SERVICES
+#include "esphome/components/api/custom_api_device.h"
+#endif
+
 namespace esphome {
 namespace hdmi_cec {
 
@@ -156,7 +160,12 @@ template<unsigned int SIZE> class FrameRingBuffer {
 
 class MessageTrigger;
 
-class HDMICEC : public Component {
+class HDMICEC : public Component
+#ifdef USE_API_CUSTOM_SERVICES
+    ,
+                public api::CustomAPIDevice
+#endif
+{
  public:
   void set_pin(InternalGPIOPin *pin) { pin_ = pin; }
   void set_address(uint8_t address) { address_ = address; }
@@ -206,6 +215,10 @@ class HDMICEC : public Component {
   FrameRingBuffer<MAX_FRAMES_QUEUED> frames_queue_;
   bool recv_ack_queued_ = false;
   Mutex send_mutex_;
+
+#ifdef USE_API_CUSTOM_SERVICES
+  void on_send_(int32_t destination, std::vector<int32_t> data);
+#endif
 };
 
 class MessageTrigger : public Trigger<uint8_t, uint8_t, std::vector<uint8_t>> {

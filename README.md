@@ -150,24 +150,24 @@ button:
 
 ---
 
-### 3. Enable CEC Commands via Home Assistant Services
+### 3. Home Assistant Services
 
-Under `api:`:
+Enable `custom_services: true` in your `api:` config to automatically register CEC services in Home Assistant:
 
 ```yaml
 api:
-  services:
-    - service: hdmi_cec_send
-      variables:
-        cec_destination: int
-        cec_data: int[]
-      then:
-        - hdmi_cec.send:
-            destination: !lambda "return static_cast<unsigned char>(cec_destination);"
-            data: !lambda |-
-              std::vector<unsigned char> vec;
-              for (int i : cec_data) vec.push_back(static_cast<unsigned char>(i));
-              return vec;
+  custom_services: true
+```
+
+This exposes the `esphome.<node>_send` service with `destination` (int) and `data` (int[]) parameters.
+
+**Example HA service call** (Developer Tools > Services):
+
+```yaml
+service: esphome.hdmi_cec_bridge_send
+data:
+  destination: 0
+  data: [0x04]  # Image View On (turn TV on)
 ```
 
 ---
@@ -278,16 +278,8 @@ logger:
 api:
   encryption:
     key: "..."
-  
-  services:
-    - service: hdmi_cec_send
-      variables:
-        cec_destination: int
-        cec_data: int[]
-      then:
-        - hdmi_cec.send:
-            destination: !lambda "return static_cast<unsigned char>(cec_destination);"
-            data: !lambda "std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;"
+  # Enable CEC services (send, etc.) in Home Assistant
+  custom_services: true
 
 ota:
   - platform: esphome

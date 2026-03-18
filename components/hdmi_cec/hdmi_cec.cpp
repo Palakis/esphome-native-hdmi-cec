@@ -69,6 +69,12 @@ void HDMICEC::setup() {
   frames_queue_.reset();
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   set_pin_input_high();
+
+#ifdef USE_API_CUSTOM_SERVICES
+  register_service(&HDMICEC::on_send_, "send", {"destination", "data"});
+#elif defined(USE_API)
+#warning "hdmi_cec: HA services are disabled. Add 'custom_services: true' to your 'api:' config to enable them."
+#endif
 }
 
 void HDMICEC::dump_config() {
@@ -452,6 +458,16 @@ void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_bit_counter_ = 0;
   self->recv_byte_buffer_ = 0x0;
 }
+
+#ifdef USE_API_CUSTOM_SERVICES
+static std::vector<uint8_t> ints_to_bytes(const std::vector<int32_t> &data) {
+  return std::vector<uint8_t>(data.begin(), data.end());
+}
+
+void HDMICEC::on_send_(int32_t destination, std::vector<int32_t> data) {
+  send(address_, static_cast<uint8_t>(destination), ints_to_bytes(data));
+}
+#endif
 
 }  // namespace hdmi_cec
 }  // namespace esphome
