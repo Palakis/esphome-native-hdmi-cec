@@ -85,7 +85,7 @@ void HDMICEC::loop() {
     uint8_t src_addr = ((header & 0xF0) >> 4);
     uint8_t dest_addr = (header & 0x0F);
 
-    if (!promiscuous_mode_ && (dest_addr != 0x0F) && (dest_addr != address_)) {
+    if (!promiscuous_mode_ && (dest_addr != CEC_ADDR_BROADCAST) && (dest_addr != address_)) {
       // ignore frames not meant for us, recycle frame buffer
       frames_queue_.push_front();
       continue;
@@ -122,7 +122,7 @@ void HDMICEC::loop() {
     }
 
     // If nothing in on_message handled this message, we try to run the built-in handlers
-    bool is_directly_addressed = (dest_addr != 0xF && dest_addr == address_);
+    bool is_directly_addressed = (dest_addr != CEC_ADDR_BROADCAST && dest_addr == address_);
     if (is_directly_addressed && !handled_by_trigger) {
       try_builtin_handler_(src_addr, dest_addr, data);
     }
@@ -131,34 +131,25 @@ void HDMICEC::loop() {
 
 uint8_t logical_address_to_device_type(uint8_t logical_address) {
   switch (logical_address) {
-    // "TV"
-    case 0x0:
-      return 0x00;  // "TV"
-
-    // "Audio System"
-    case 0x5:
-      return 0x05;  // "Audio System"
-
-    // "Recording 1"
-    case 0x1:
-    // "Recording 2"
-    case 0x2:
-    // "Recording 3"
-    case 0x9:
-      return 0x01;  // "Recording Device"
-
-    // "Tuner 1"
-    case 0x3:
-    // "Tuner 2"
-    case 0x6:
-    // "Tuner 3"
-    case 0x7:
-    // "Tuner 4"
-    case 0xA:
-      return 0x03;  // "Tuner"
-
+    case CEC_ADDR_TV:
+      return CEC_DEVICE_TYPE_TV;
+    case CEC_ADDR_AUDIO_SYSTEM:
+      return CEC_DEVICE_TYPE_AUDIO_SYSTEM;
+    case CEC_ADDR_RECORDING_1:
+    case CEC_ADDR_RECORDING_2:
+    case CEC_ADDR_RECORDING_3:
+      return CEC_DEVICE_TYPE_RECORDING;
+    case CEC_ADDR_TUNER_1:
+    case CEC_ADDR_TUNER_2:
+    case CEC_ADDR_TUNER_3:
+    case CEC_ADDR_TUNER_4:
+      return CEC_DEVICE_TYPE_TUNER;
+    case CEC_ADDR_PLAYBACK_1:
+    case CEC_ADDR_PLAYBACK_2:
+    case CEC_ADDR_PLAYBACK_3:
+      return CEC_DEVICE_TYPE_PLAYBACK;
     default:
-      return 0x04;  // "Playback Device"
+      return CEC_DEVICE_TYPE_OTHER;
   }
 }
 
@@ -169,50 +160,37 @@ void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const st
 
   uint8_t opcode = data[0];
   switch (opcode) {
-    // "Get CEC Version" request
-    case 0x9F: {
-      // reply with "CEC Version" (0x9E)
-      send(address_, source, {0x9E, 0x04});
+    case CEC_OPCODE_GET_CEC_VERSION: {
+      send(address_, source, {CEC_OPCODE_CEC_VERSION, CEC_VERSION_1_3A});
       break;
     }
 
-    // "Give Device Power Status" request
-    case 0x8F: {
-      // reply with "Report Power Status" (0x90)
-      send(address_, source, {0x90, 0x00});  // "On"
+    case CEC_OPCODE_GIVE_DEVICE_POWER_STATUS: {
+      send(address_, source, {CEC_OPCODE_REPORT_POWER_STATUS, CEC_POWER_STATUS_ON});
       break;
     }
 
-    // "Give OSD Name" request
-    case 0x46: {
-      // reply with "Set OSD Name" (0x47)
-      std::vector<uint8_t> data = {0x47};
+    case CEC_OPCODE_GIVE_OSD_NAME: {
+      std::vector<uint8_t> data = {CEC_OPCODE_SET_OSD_NAME};
       data.insert(data.end(), osd_name_bytes_.begin(), osd_name_bytes_.end());
       send(address_, source, data);
       break;
     }
 
-    // "Give Physical Address" request
-    case 0x83: {
-      // reply with "Report Physical Address" (0x84)
+    case CEC_OPCODE_GIVE_PHYSICAL_ADDRESS: {
       auto physical_address_bytes = decode_value(physical_address_);
-      std::vector<uint8_t> data = {0x84};
+      std::vector<uint8_t> data = {CEC_OPCODE_REPORT_PHYSICAL_ADDRESS};
       data.insert(data.end(), physical_address_bytes.begin(), physical_address_bytes.end());
-      // Device Type
       data.push_back(logical_address_to_device_type(address_));
-      // Broadcast Physical Address
-      send(address_, 0xF, data);
+      send(address_, CEC_ADDR_BROADCAST, data);
       break;
     }
 
-    // Ignore "Feature Abort" opcode responses
-    case 0x00:
-      // no-op
+    case CEC_OPCODE_FEATURE_ABORT:
       break;
 
-    // default case (no built-in handler + no on_message handler) => message not supported => send "Feature Abort"
     default:
-      send(address_, source, {0x00, opcode, 0x00});
+      send(address_, source, {CEC_OPCODE_FEATURE_ABORT, opcode, CEC_ABORT_UNRECOGNIZED_OPCODE});
       break;
   }
 }
@@ -221,7 +199,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   if (monitor_mode_)
     return false;
 
-  bool is_broadcast = (destination == 0xF);
+  bool is_broadcast = (destination == CEC_ADDR_BROADCAST);
 
   // prepare the bytes to send
   Frame frame(source, destination, data_bytes);
@@ -435,8 +413,8 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
 
     case ReceiverState::WaitingForEOM: {
       // check if we need to acknowledge this byte on the next bit
-      uint8_t destination_address = self->frame_receive_ ? (self->frame_receive_->front() & 0x0F) : 0xF;
-      if (destination_address != 0xF && destination_address == self->address_) {
+      uint8_t destination_address = self->frame_receive_ ? (self->frame_receive_->front() & 0x0F) : CEC_ADDR_BROADCAST;
+      if (destination_address != CEC_ADDR_BROADCAST && destination_address == self->address_) {
         self->recv_ack_queued_ = true;
       }
 

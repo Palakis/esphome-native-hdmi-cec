@@ -11,6 +11,71 @@
 namespace esphome {
 namespace hdmi_cec {
 
+enum CecLogicalAddress : uint8_t {
+  CEC_ADDR_TV = 0x0,
+  CEC_ADDR_RECORDING_1 = 0x1,
+  CEC_ADDR_RECORDING_2 = 0x2,
+  CEC_ADDR_TUNER_1 = 0x3,
+  CEC_ADDR_PLAYBACK_1 = 0x4,
+  CEC_ADDR_AUDIO_SYSTEM = 0x5,
+  CEC_ADDR_TUNER_2 = 0x6,
+  CEC_ADDR_TUNER_3 = 0x7,
+  CEC_ADDR_PLAYBACK_2 = 0x8,
+  CEC_ADDR_RECORDING_3 = 0x9,
+  CEC_ADDR_TUNER_4 = 0xA,
+  CEC_ADDR_PLAYBACK_3 = 0xB,
+  CEC_ADDR_RESERVED_1 = 0xC,
+  CEC_ADDR_RESERVED_2 = 0xD,
+  CEC_ADDR_FREE_USE = 0xE,
+  CEC_ADDR_BROADCAST = 0xF,
+};
+
+enum CecOpcode : uint8_t {
+  CEC_OPCODE_FEATURE_ABORT = 0x00,
+  CEC_OPCODE_GIVE_OSD_NAME = 0x46,
+  CEC_OPCODE_SET_OSD_NAME = 0x47,
+  CEC_OPCODE_GIVE_PHYSICAL_ADDRESS = 0x83,
+  CEC_OPCODE_REPORT_PHYSICAL_ADDRESS = 0x84,
+  CEC_OPCODE_GIVE_DEVICE_POWER_STATUS = 0x8F,
+  CEC_OPCODE_REPORT_POWER_STATUS = 0x90,
+  CEC_OPCODE_CEC_VERSION = 0x9E,
+  CEC_OPCODE_GET_CEC_VERSION = 0x9F,
+};
+
+enum CecVersion : uint8_t {
+  CEC_VERSION_1_1 = 0x00,
+  CEC_VERSION_1_2 = 0x01,
+  CEC_VERSION_1_2A = 0x02,
+  CEC_VERSION_1_3 = 0x03,
+  CEC_VERSION_1_3A = 0x04,
+  CEC_VERSION_1_4 = 0x05,
+  CEC_VERSION_2_0 = 0x06,
+};
+
+enum CecPowerStatus : uint8_t {
+  CEC_POWER_STATUS_ON = 0x00,
+  CEC_POWER_STATUS_STANDBY = 0x01,
+  CEC_POWER_STATUS_IN_TRANSITION_TO_ON = 0x02,
+  CEC_POWER_STATUS_IN_TRANSITION_TO_STANDBY = 0x03,
+};
+
+enum CecDeviceType : uint8_t {
+  CEC_DEVICE_TYPE_TV = 0x00,
+  CEC_DEVICE_TYPE_RECORDING = 0x01,
+  CEC_DEVICE_TYPE_TUNER = 0x03,
+  CEC_DEVICE_TYPE_PLAYBACK = 0x04,
+  CEC_DEVICE_TYPE_AUDIO_SYSTEM = 0x05,
+  CEC_DEVICE_TYPE_OTHER = 0xFF,
+};
+
+enum CecAbortReason : uint8_t {
+  CEC_ABORT_UNRECOGNIZED_OPCODE = 0x00,
+  CEC_ABORT_NOT_IN_CORRECT_MODE = 0x01,
+  CEC_ABORT_CANNOT_PROVIDE_SOURCE = 0x02,
+  CEC_ABORT_INVALID_OPERAND = 0x03,
+  CEC_ABORT_REFUSED = 0x04,
+};
+
 class Frame : public std::vector<uint8_t> {
  public:
   Frame() = default;
@@ -18,7 +83,7 @@ class Frame : public std::vector<uint8_t> {
   uint8_t initiator_addr() const { return (this->at(0) >> 4) & 0xf; }
   uint8_t destination_addr() const { return this->at(0) & 0xf; }
   uint8_t opcode() const { return (this->size() >= 2) ? this->at(1) : 0; }
-  bool is_broadcast() const { return this->destination_addr() == 0xf; }
+  bool is_broadcast() const { return this->destination_addr() == CEC_ADDR_BROADCAST; }
   std::string to_string(bool skip_decode = 0) const;
   constexpr static int MAX_LENGTH = 16;  // from HDMI CEC standard 1.4
 };
