@@ -65,7 +65,7 @@ const std::array<const char *, 0x77> Decoder::UI_Commands = {
     "Previous Channel",
     "Sound Select",
     "Input Select",
-    "isplay Information",
+    "Display Information",
     "Help",
     "Page Up",
     /* 0x38 = */ "Page Down",
@@ -155,12 +155,9 @@ template<uint32_t OPERANDS> bool Decoder::do_operand() {
 template<> bool Decoder::do_operand<Decoder::None>() { return append_operand(""); }
 
 template<> bool Decoder::do_operand<Decoder::AbortReason>() {
-  const static std::array<const char *, 7> names = {"Unrecognized opcode",
-                                                    "Not in correct mode to respond",
-                                                    "Cannot provide source",
-                                                    "Invalid operand",
-                                                    "Refused",
-                                                    "Unable to determine"};
+  const static std::array<const char *, 7> names = {
+      "Unrecognized opcode", "Not in correct mode to respond", "Cannot provide source", "Invalid operand", "Refused",
+      "Unable to determine"};
   return append_operand<names.size()>(names);
 }
 
@@ -185,15 +182,14 @@ template<> bool Decoder::do_operand<Decoder::AudioStatus>() {
 }
 
 template<> bool Decoder::do_operand<Decoder::DeviceType>() {
-  const static std::array<const char *, 9> names = {"TV]",           "Recording Device]", "Reserved",
-                                                    "Tuner",       "Playback Device", "Audio System",
-                                                    "Pure CEC Switch", "Video Processor"};
+  const static std::array<const char *, 9> names = {
+      "TV",           "Recording Device", "Reserved",       "Tuner", "Playback Device",
+      "Audio System", "Pure CEC Switch",  "Video Processor"};
   return append_operand<names.size()>(names);
 }
 
 template<> bool Decoder::do_operand<Decoder::DisplayControl>() {
-  const static std::array<const char *, 9> names = {"Default Time", "Until cleared", "Clear previous",
-                                                    "Reserved"};
+  const static std::array<const char *, 9> names = {"Default Time", "Until cleared", "Clear previous", "Reserved"};
   return append_operand<names.size()>(names);
 }
 
@@ -376,7 +372,6 @@ const Decoder::CecOpcodeTable Decoder::cec_opcode_table = {
     {0x45, {"User Control Released", &Decoder::do_operand<None>}},
     {0x8F, {"Give Device Power Status", &Decoder::do_operand<None>}},
     {0x90, {"Report Power Status", &Decoder::do_operand<PowerStatus>}},
-    {0x00, {"Feature Abort", &Decoder::do_operand<Two(FeatureOpcode, AbortReason)>}},
     {0xFF, {"Abort", &Decoder::do_operand<None>}},
     {0x71, {"Give Audio Status", &Decoder::do_operand<None>}},
     {0x7D, {"Give System Audio Mode Status", &Decoder::do_operand<None>}},
@@ -396,13 +391,13 @@ const Decoder::CecOpcodeTable Decoder::cec_opcode_table = {
     {0xF8, {"CDC Message", &Decoder::do_operand<None>}}};
 
 const std::map<uint32_t, const char *> Decoder::vendor_ids = {
-    {0x000039, "Toshiba"}, {0x0000F0, "Samsung"},     {0x0005CD, "Denon"},         {0x000678, "Maranz"},
+    {0x000039, "Toshiba"}, {0x0000F0, "Samsung"},     {0x0005CD, "Denon"},         {0x000678, "Marantz"},
     {0x000982, "Loewe"},   {0x0009B0, "Onkyo"},       {0x000CB8, "Medion"},        {0x000CE7, "Toshiba"},
     {0x0010FA, "Apple"},   {0x001582, "Pulse Eight"}, {0x001950, "Harman Kardon"}, {0x001A11, "Google"},
     {0x0020C7, "Akai"},    {0x002467, "AOC"},         {0x008045, "Panasonic"},     {0x00903E, "Philips"},
     {0x009053, "Daewoo"},  {0x00A0DE, "Yamaha"},      {0x00D0D5, "Grundig"},       {0x00E036, "Pioneer"},
     {0x00E091, "LG"},      {0x08001F, "Sharp"},       {0x080046, "Sony"},          {0x18C086, "Broadcom"},
-    {0x534850, "Sharp"},   {0x6B746D, "Vizio"},       {0x8065E9, "Benq"},          {0x9C645E, "Harman Kardon"}};
+    {0x534850, "Sharp"},   {0x6B746D, "Vizio"},       {0x8065E9, "BenQ"},          {0x9C645E, "Harman Kardon"}};
 
 std::string Decoder::address_decode() const {
   const static std::array<const char *, 16> names = {"TV",           "RecordingDev1", "RecordingDev2", "Tuner1",
