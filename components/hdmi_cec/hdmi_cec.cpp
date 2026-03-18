@@ -70,6 +70,17 @@ void HDMICEC::setup() {
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   set_pin_input_high();
 
+  if (negotiation_needed_) {
+    negotiate_address_();
+    broadcast_physical_address_();
+  }
+
+  if (address_sensor_ != nullptr) {
+    char buf[5];
+    sprintf(buf, "0x%X", address_);
+    address_sensor_->publish_state(buf);
+  }
+
 #ifdef USE_API_CUSTOM_SERVICES
   register_service(&HDMICEC::on_send_, "send", {"destination", "data"});
 #elif defined(USE_API)
@@ -80,7 +91,7 @@ void HDMICEC::setup() {
 void HDMICEC::dump_config() {
   ESP_LOGCONFIG(TAG, "HDMI-CEC");
   LOG_PIN("  pin: ", pin_);
-  ESP_LOGCONFIG(TAG, "  address: %x", address_);
+  ESP_LOGCONFIG(TAG, "  address: 0x%X", address_);
   ESP_LOGCONFIG(TAG, "  promiscuous mode: %s", (promiscuous_mode_ ? "yes" : "no"));
   ESP_LOGCONFIG(TAG, "  monitor mode: %s", (monitor_mode_ ? "yes" : "no"));
 }
@@ -157,6 +168,101 @@ uint8_t logical_address_to_device_type(uint8_t logical_address) {
     default:
       return CEC_DEVICE_TYPE_OTHER;
   }
+}
+
+static const std::vector<uint8_t> &device_type_to_candidate_addresses(uint8_t device_type) {
+  static const std::vector<uint8_t> TV_ADDRS = {CEC_ADDR_TV};
+  static const std::vector<uint8_t> RECORDING_ADDRS = {CEC_ADDR_RECORDING_1, CEC_ADDR_RECORDING_2,
+                                                       CEC_ADDR_RECORDING_3};
+  static const std::vector<uint8_t> TUNER_ADDRS = {CEC_ADDR_TUNER_1, CEC_ADDR_TUNER_2, CEC_ADDR_TUNER_3,
+                                                   CEC_ADDR_TUNER_4};
+  static const std::vector<uint8_t> PLAYBACK_ADDRS = {CEC_ADDR_PLAYBACK_1, CEC_ADDR_PLAYBACK_2, CEC_ADDR_PLAYBACK_3};
+  static const std::vector<uint8_t> AUDIO_ADDRS = {CEC_ADDR_AUDIO_SYSTEM};
+  static const std::vector<uint8_t> OTHER_ADDRS = {CEC_ADDR_FREE_USE, CEC_ADDR_RESERVED_2, CEC_ADDR_RESERVED_1};
+
+  switch (device_type) {
+    case CEC_DEVICE_TYPE_TV:
+      return TV_ADDRS;
+    case CEC_DEVICE_TYPE_RECORDING:
+      return RECORDING_ADDRS;
+    case CEC_DEVICE_TYPE_TUNER:
+      return TUNER_ADDRS;
+    case CEC_DEVICE_TYPE_PLAYBACK:
+      return PLAYBACK_ADDRS;
+    case CEC_DEVICE_TYPE_AUDIO_SYSTEM:
+      return AUDIO_ADDRS;
+    default:
+      return OTHER_ADDRS;
+  }
+}
+
+bool HDMICEC::test_address_available_(uint8_t candidate_address) {
+  // Send a polling message: header-only frame where source == destination
+  Frame frame(candidate_address, candidate_address, {});
+
+  // Wait for signal free time (5 bit periods for new initiator)
+  int32_t delay = 5 * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros();
+  if (delay > 0) {
+    delay_microseconds_safe(delay);
+  }
+
+  // For a directed message (non-broadcast), send_frame_ returns:
+  //   Success if ACKed (another device has this address)
+  //   NoAck if not ACKed (address is free)
+  auto result = send_frame_(frame, false);
+  last_sent_us_ = micros();
+
+  if (result == SendResult::NoAck) {
+    ESP_LOGD(TAG, "Address 0x%X is free", candidate_address);
+    return true;
+  }
+  ESP_LOGD(TAG, "Address 0x%X is taken (result=%d)", candidate_address, (int) result);
+  return false;
+}
+
+void HDMICEC::negotiate_address_() {
+  if (!device_type_.has_value()) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Starting CEC logical address negotiation");
+
+  address_ = CEC_ADDR_BROADCAST;  // Unregistered during negotiation
+
+  const auto &candidates = device_type_to_candidate_addresses(device_type_.value());
+
+  LockGuard send_lock(send_mutex_);
+
+  // First, try the spec-preferred addresses for our device type
+  for (uint8_t candidate : candidates) {
+    if (test_address_available_(candidate)) {
+      address_ = candidate;
+      ESP_LOGI(TAG, "Claimed logical address 0x%X", address_);
+      return;
+    }
+  }
+
+  // All preferred addresses taken. Fall back to any available address,
+  // starting from 0xE (reserved/rarely used) down through standard addresses.
+  // Skip 0xF (broadcast) and any we already tried above.
+  ESP_LOGI(TAG, "Preferred addresses taken, trying fallback addresses");
+  for (int8_t candidate = CEC_ADDR_FREE_USE; candidate >= 0; candidate--) {
+    if (test_address_available_(candidate)) {
+      address_ = candidate;
+      ESP_LOGI(TAG, "Claimed fallback logical address 0x%X", address_);
+      return;
+    }
+  }
+
+  ESP_LOGW(TAG, "All addresses taken, using Unregistered (0xF)");
+}
+
+void HDMICEC::broadcast_physical_address_() {
+  auto physical_address_bytes = decode_value(physical_address_);
+  std::vector<uint8_t> data = {CEC_OPCODE_REPORT_PHYSICAL_ADDRESS};
+  data.insert(data.end(), physical_address_bytes.begin(), physical_address_bytes.end());
+  data.push_back(logical_address_to_device_type(address_));
+  send(address_, CEC_ADDR_BROADCAST, data);
 }
 
 void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data) {
