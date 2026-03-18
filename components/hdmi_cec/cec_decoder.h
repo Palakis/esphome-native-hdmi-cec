@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <map>
 
 #include "hdmi_cec.h"
 
@@ -24,6 +23,10 @@ class Decoder {
  public:
   Decoder(const Frame &frame) : frame_(frame), length_(0), offset_(2) {}
   std::string decode();
+  static const char *find_vendor_name(uint32_t id);
+  static const char *find_device_type_name(uint8_t type);
+  static const char *find_power_status_name(uint8_t status);
+  static const char *find_cec_version_name(uint8_t version);
 
  protected:
   const char *find_opcode_name(uint32_t opcode) const;
@@ -44,8 +47,7 @@ class Decoder {
     const char *name;                // name of the operation (of the op_code)
     const OperandDecode_f decode_f;  // a pointer to the corresponding 'do_operand()' method
   };
-  using CecOpcodeTable = const std::map<uint8_t, FrameType>;
-  const static CecOpcodeTable cec_opcode_table;
+  static const FrameType *find_opcode(uint8_t opcode);
 
   const Frame &frame_;
   std::array<char, 256> line_;  // to hold the text of the decoded frame
@@ -138,13 +140,6 @@ class Decoder {
     return append_operand(s);
   }
 
-  /**
-   * String tables used in the subsequent 'do_operand' decode functions
-   */
-  const static std::array<const char *, 0x77> UI_Commands;
-  const static std::array<const char *, 0x11> audio_formats;
-  const static std::array<const char *, 8> audio_samplerates;
-  const static std::map<uint32_t, const char *> vendor_ids;
 };  // class Decoder
 }  // namespace hdmi_cec
 }  // namespace esphome
