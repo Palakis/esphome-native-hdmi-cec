@@ -1,0 +1,7 @@
+BasedOnStyle: Google
+AllowShortIfStatementsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: MultiLine
+ColumnLimit: 120
+PointerAlignment: Right
+SpaceAfterCStyleCast: true
+SpaceAfterTemplateKeyword: false

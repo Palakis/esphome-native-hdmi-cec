@@ -1,15 +1,105 @@
 #pragma once
 
 #include <array>
-#include <vector>
 #include <atomic>
+#include <string>
+#include <vector>
 
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/button/button.h"
+#include "esphome/components/number/number.h"
+#include "esphome/components/switch/switch.h"
+#include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
-#include "esphome/core/automation.h"
+
+#ifdef USE_API_CUSTOM_SERVICES
+#include "esphome/components/api/custom_api_device.h"
+#endif
 
 namespace esphome {
 namespace hdmi_cec {
+
+static constexpr uint32_t DEFAULT_POWER_POLL_INTERVAL_MS = 2000;
+
+enum CecLogicalAddress : uint8_t {
+  CEC_ADDR_TV = 0x0,
+  CEC_ADDR_RECORDING_1 = 0x1,
+  CEC_ADDR_RECORDING_2 = 0x2,
+  CEC_ADDR_TUNER_1 = 0x3,
+  CEC_ADDR_PLAYBACK_1 = 0x4,
+  CEC_ADDR_AUDIO_SYSTEM = 0x5,
+  CEC_ADDR_TUNER_2 = 0x6,
+  CEC_ADDR_TUNER_3 = 0x7,
+  CEC_ADDR_PLAYBACK_2 = 0x8,
+  CEC_ADDR_RECORDING_3 = 0x9,
+  CEC_ADDR_TUNER_4 = 0xA,
+  CEC_ADDR_PLAYBACK_3 = 0xB,
+  CEC_ADDR_RESERVED_1 = 0xC,
+  CEC_ADDR_RESERVED_2 = 0xD,
+  CEC_ADDR_FREE_USE = 0xE,
+  CEC_ADDR_MAX_ASSIGNABLE = 0xE,
+  CEC_ADDR_BROADCAST = 0xF,
+};
+
+enum CecOpcode : uint8_t {
+  CEC_OPCODE_FEATURE_ABORT = 0x00,
+  CEC_OPCODE_IMAGE_VIEW_ON = 0x04,
+  CEC_OPCODE_STANDBY = 0x36,
+  CEC_OPCODE_USER_CONTROL_PRESSED = 0x44,
+  CEC_OPCODE_USER_CONTROL_RELEASED = 0x45,
+  CEC_OPCODE_GIVE_OSD_NAME = 0x46,
+  CEC_OPCODE_SET_OSD_NAME = 0x47,
+  CEC_OPCODE_ACTIVE_SOURCE = 0x82,
+  CEC_OPCODE_GIVE_PHYSICAL_ADDRESS = 0x83,
+  CEC_OPCODE_REPORT_PHYSICAL_ADDRESS = 0x84,
+  CEC_OPCODE_DEVICE_VENDOR_ID = 0x87,
+  CEC_OPCODE_GIVE_DEVICE_VENDOR_ID = 0x8C,
+  CEC_OPCODE_GIVE_DEVICE_POWER_STATUS = 0x8F,
+  CEC_OPCODE_REPORT_POWER_STATUS = 0x90,
+  CEC_OPCODE_CEC_VERSION = 0x9E,
+  CEC_OPCODE_GET_CEC_VERSION = 0x9F,
+};
+
+enum CecVersion : uint8_t {
+  CEC_VERSION_1_1 = 0x00,
+  CEC_VERSION_1_2 = 0x01,
+  CEC_VERSION_1_2A = 0x02,
+  CEC_VERSION_1_3 = 0x03,
+  CEC_VERSION_1_3A = 0x04,
+  CEC_VERSION_1_4 = 0x05,
+  CEC_VERSION_2_0 = 0x06,
+};
+
+enum CecPowerStatus : uint8_t {
+  CEC_POWER_STATUS_ON = 0x00,
+  CEC_POWER_STATUS_STANDBY = 0x01,
+  CEC_POWER_STATUS_IN_TRANSITION_TO_ON = 0x02,
+  CEC_POWER_STATUS_IN_TRANSITION_TO_STANDBY = 0x03,
+};
+
+enum CecDeviceType : uint8_t {
+  CEC_DEVICE_TYPE_TV = 0x00,
+  CEC_DEVICE_TYPE_RECORDING = 0x01,
+  CEC_DEVICE_TYPE_TUNER = 0x03,
+  CEC_DEVICE_TYPE_PLAYBACK = 0x04,
+  CEC_DEVICE_TYPE_AUDIO_SYSTEM = 0x05,
+  CEC_DEVICE_TYPE_OTHER = 0xFF,
+};
+
+enum CecAbortReason : uint8_t {
+  CEC_ABORT_UNRECOGNIZED_OPCODE = 0x00,
+  CEC_ABORT_NOT_IN_CORRECT_MODE = 0x01,
+  CEC_ABORT_CANNOT_PROVIDE_SOURCE = 0x02,
+  CEC_ABORT_INVALID_OPERAND = 0x03,
+  CEC_ABORT_REFUSED = 0x04,
+};
+
+enum CecUserControlCode : uint8_t {
+  CEC_UI_COMMAND_POWER_OFF = 0x6C,
+  CEC_UI_COMMAND_POWER_ON = 0x6D,
+};
 
 class Frame : public std::vector<uint8_t> {
  public:
@@ -18,7 +108,7 @@ class Frame : public std::vector<uint8_t> {
   uint8_t initiator_addr() const { return (this->at(0) >> 4) & 0xf; }
   uint8_t destination_addr() const { return this->at(0) & 0xf; }
   uint8_t opcode() const { return (this->size() >= 2) ? this->at(1) : 0; }
-  bool is_broadcast() const { return this->destination_addr() == 0xf; }
+  bool is_broadcast() const { return this->destination_addr() == CEC_ADDR_BROADCAST; }
   std::string to_string(bool skip_decode = 0) const;
   constexpr static int MAX_LENGTH = 16;  // from HDMI CEC standard 1.4
 };
@@ -38,57 +128,90 @@ enum class SendResult : uint8_t {
 };
 
 /*
-* The FrameRingBuffer is a container for Frames to queue data in a consumer-producer
-* application. The use of std::Atomics allows safe multi-thread operation when used with
-* a single producer and single consumer thread, where each Atomic index is updated
-* by one thread only.
-* After initialization, it operates without dynamic memmory allocation.
-* This allows the gpio isr to safely and efficiently pick-up and pass Frames.
-* Due to its fixed memory size, it might return NULL pointers in case the buffer is full or empty.
-*/
-template <unsigned int SIZE>
-class FrameRingBuffer {
-  public:
-  FrameRingBuffer()
-  : front_inx_{0}
-  , back_inx_{0}
-  , store_{} {
-    for (auto& t : store_) {
+ * The FrameRingBuffer is a container for Frames to queue data in a consumer-producer
+ * application. The use of std::Atomics allows safe multi-thread operation when used with
+ * a single producer and single consumer thread, where each Atomic index is updated
+ * by one thread only.
+ * After initialization, it operates without dynamic memmory allocation.
+ * This allows the gpio isr to safely and efficiently pick-up and pass Frames.
+ * Due to its fixed memory size, it might return NULL pointers in case the buffer is full or empty.
+ */
+template<unsigned int SIZE> class FrameRingBuffer {
+ public:
+  FrameRingBuffer() : front_inx_{0}, back_inx_{0}, store_{} {
+    for (auto &t : store_) {
       t = new Frame;
       t->reserve(Frame::MAX_LENGTH);
     }
   }
   ~FrameRingBuffer() {
-    for (auto& t : store_) {
+    for (auto &t : store_) {
       delete t;
     }
   }
   // 'front' is used to access data, use that, and recycle its memory space for later use.
-  Frame* front() const { return is_empty() ? nullptr : store_[front_inx_]; }
+  Frame *front() const { return is_empty() ? nullptr : store_[front_inx_]; }
   void push_front() { cyclic_incr(front_inx_); }
   // 'back' is used to fetch a free Frame, fill with data, and queue for later pick-up
-  Frame* back() const { return is_full() ? nullptr : (store_[back_inx_]->clear(), store_[back_inx_]); }
+  Frame *back() const { return is_full() ? nullptr : (store_[back_inx_]->clear(), store_[back_inx_]); }
   void push_back() { cyclic_incr(back_inx_); }
-  bool is_empty() const {return count() == 0;}
-  bool is_full() const {return count() == SIZE;}  // using safe wrap-around of unsignd int
-  void reset() {front_inx_ = 0; back_inx_ = 0;}
+  bool is_empty() const { return count() == 0; }
+  bool is_full() const { return count() == SIZE; }  // using safe wrap-around of unsignd int
+  void reset() {
+    front_inx_ = 0;
+    back_inx_ = 0;
+  }
 
-  protected:
+ protected:
   using Index = std::atomic<unsigned int>;
   // this simple increment scheme is sufficiently 'atomic' if the front and back are each used by
   // one thread only. (So, at most one reader thread and one writer thread in the application.)
-  int count() const {int n = (int)(back_inx_ - front_inx_); if (n < 0) n += SIZE + 1; return n;}
+  int count() const {
+    int n = (int) (back_inx_ - front_inx_);
+    if (n < 0)
+      n += SIZE + 1;
+    return n;
+  }
   void cyclic_incr(Index &inx) { inx = (inx == SIZE) ? 0 : (inx + 1); }
   Index front_inx_;  // ranging 0 .. SIZE
   Index back_inx_;   // ranging 0 .. SIZE
   // if front_inx_ == back_inx_ the store is empty, so it can hold at most SIZE elements
-  std::array<Frame*, SIZE + 1> store_;
+  std::array<Frame *, SIZE + 1> store_;
 };
 
+// Forward declarations
+class HDMICEC;
+class CECRemoteDevice;
 class MessageTrigger;
+class ScanCompleteTrigger;
 
-class HDMICEC : public Component {
-public:
+class CECDevice {
+ public:
+  uint8_t logical_address = 0xFF;
+  uint8_t device_type = 0xFF;
+  uint16_t physical_address = 0xFFFF;
+  std::string osd_name;
+  uint32_t vendor_id = 0xFFFFFF;
+  uint8_t power_status = 0xFF;
+  uint8_t cec_version = 0xFF;
+  bool active_source = false;
+  uint32_t last_seen_ms = 0;
+
+  static std::string device_type_to_string(uint8_t type);
+  static std::string physical_address_to_string(uint16_t addr);
+  static std::string vendor_id_to_string(uint32_t id);
+  static std::string vendor_name_to_string(uint32_t id);
+  static std::string cec_version_to_string(uint8_t version);
+  static std::string power_status_to_string(uint8_t status);
+};
+
+class HDMICEC : public Component
+#ifdef USE_API_CUSTOM_SERVICES
+    ,
+                public api::CustomAPIDevice
+#endif
+{
+ public:
   void set_pin(InternalGPIOPin *pin) { pin_ = pin; }
   void set_address(uint8_t address) { address_ = address; }
   uint8_t address() { return address_; }
@@ -96,9 +219,37 @@ public:
   void set_promiscuous_mode(bool promiscuous_mode) { promiscuous_mode_ = promiscuous_mode; }
   void set_monitor_mode(bool monitor_mode) { monitor_mode_ = monitor_mode; }
   void set_osd_name_bytes(const std::vector<uint8_t> &osd_name_bytes) { osd_name_bytes_ = osd_name_bytes; }
+  void set_device_type(uint8_t device_type) {
+    device_type_ = device_type;
+    negotiation_needed_ = true;
+  }
   void add_message_trigger(MessageTrigger *trigger) { message_triggers_.push_back(trigger); }
+  void set_address_sensor(text_sensor::TextSensor *sensor) { address_sensor_ = sensor; }
+  void set_active_source_sensor(text_sensor::TextSensor *sensor) { active_source_sensor_ = sensor; }
+  void add_scan_complete_trigger(ScanCompleteTrigger *trigger) { scan_complete_triggers_.push_back(trigger); }
+  void add_remote_device(CECRemoteDevice *dev) { remote_devices_.push_back(dev); }
+  void set_power_poll_interval(uint32_t ms);
+  void set_power_poll_number(number::Number *num) { power_poll_number_ = num; }
 
   bool send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes);
+  bool send_to_osd_name(uint8_t source, const std::string &name, const std::vector<uint8_t> &data);
+  bool send_to_physical_address(uint8_t source, uint16_t phys_addr, const std::vector<uint8_t> &data);
+  bool send_to_vendor_and_type(uint8_t source, uint32_t vendor_id, uint8_t device_type,
+                               const std::vector<uint8_t> &data);
+  void send_button_press(uint8_t destination, uint8_t ui_command);
+
+  // Bus scanning
+  void start_scan();
+  bool is_scanning() const { return scanning_; }
+  void set_scan_on_boot(bool val) { scan_on_boot_ = val; }
+  void set_scan_boot_delay(uint32_t ms) { scan_boot_delay_ms_ = ms; }
+
+  // Device registry queries
+  const CECDevice &get_device(uint8_t logical_address) const;
+  bool seen_on_last_scan(uint8_t logical_address) const;
+  optional<uint8_t> find_address_by_osd_name(const std::string &name) const;
+  optional<uint8_t> find_address_by_physical_address(uint16_t addr) const;
+  optional<uint8_t> find_address_by_vendor_and_type(uint32_t vendor_id, uint8_t device_type) const;
 
   // Component overrides
   float get_setup_priority() { return esphome::setup_priority::HARDWARE; }
@@ -106,10 +257,16 @@ public:
   void dump_config() override;
   void loop() override;
 
-protected:
+ protected:
   static void gpio_intr_(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
   void try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data);
+  bool test_address_available_(uint8_t candidate_address);
+  void negotiate_address_();
+  void broadcast_physical_address_();
+  void complete_scan_();
+  void update_devices_(uint8_t src, uint8_t dest, const std::vector<uint8_t> &data);
+  void notify_remote_devices_(uint8_t logical_address);
   SendResult send_frame_(const Frame &frame, bool is_broadcast);
   bool send_start_bit_();
   void send_bit_(bool bit_value);
@@ -124,12 +281,16 @@ protected:
   uint16_t physical_address_;
   bool promiscuous_mode_;
   bool monitor_mode_;
+  optional<uint8_t> device_type_;
+  bool negotiation_needed_ = false;
   std::vector<uint8_t> osd_name_bytes_;
-  std::vector<MessageTrigger*> message_triggers_;
+  std::vector<MessageTrigger *> message_triggers_;
+  text_sensor::TextSensor *address_sensor_{nullptr};
+  text_sensor::TextSensor *active_source_sensor_{nullptr};
 
-  bool last_level_ = true;            // cec line level on last isr call
-  uint32_t last_falling_edge_us_ = 0; // timepoint in received message
-  uint32_t last_sent_us_ = 0;         // timepoint on end of sent message
+  bool last_level_ = true;             // cec line level on last isr call
+  uint32_t last_falling_edge_us_ = 0;  // timepoint in received message
+  uint32_t last_sent_us_ = 0;          // timepoint on end of sent message
   ReceiverState receiver_state_;
   uint8_t recv_bit_counter_ = 0;
   uint8_t recv_byte_buffer_ = 0;
@@ -137,42 +298,262 @@ protected:
   FrameRingBuffer<MAX_FRAMES_QUEUED> frames_queue_;
   bool recv_ack_queued_ = false;
   Mutex send_mutex_;
+
+  // Device registry and scanning
+  std::array<CECDevice, CEC_ADDR_MAX_ASSIGNABLE + 1> devices_;
+  bool scanning_ = false;
+  std::array<bool, CEC_ADDR_MAX_ASSIGNABLE + 1> scan_pending_ = {};
+  uint32_t last_scan_start_ms_ = 0;
+  bool scan_on_boot_ = true;
+  uint32_t scan_boot_delay_ms_ = 3000;
+  std::vector<ScanCompleteTrigger *> scan_complete_triggers_;
+  std::vector<CECRemoteDevice *> remote_devices_;
+
+#ifdef USE_API_CUSTOM_SERVICES
+  void on_send_(int32_t destination, std::vector<int32_t> data);
+  void on_send_to_osd_name_(std::string osd_name, std::vector<int32_t> data);
+  void on_send_to_physical_address_(int32_t physical_address, std::vector<int32_t> data);
+  void on_send_to_vendor_and_type_(int32_t vendor_id, int32_t device_type, std::vector<int32_t> data);
+  void on_scan_bus_();
+#endif
+
+  // Power status polling
+  uint32_t power_poll_interval_ms_{DEFAULT_POWER_POLL_INTERVAL_MS};
+  number::Number *power_poll_number_{nullptr};
+  size_t poll_power_index_{0};
 };
 
 class MessageTrigger : public Trigger<uint8_t, uint8_t, std::vector<uint8_t>> {
   friend class HDMICEC;
 
-public:
+ public:
   explicit MessageTrigger(HDMICEC *parent) { parent->add_message_trigger(this); };
   void set_source(uint8_t source) { source_ = source; };
   void set_destination(uint8_t destination) { destination_ = destination; };
   void set_opcode(uint8_t opcode) { opcode_ = opcode; };
   void set_data(const std::vector<uint8_t> &data) { data_ = data; };
 
-protected:
+ protected:
   optional<uint8_t> source_;
   optional<uint8_t> destination_;
   optional<uint8_t> opcode_;
   optional<std::vector<uint8_t>> data_;
 };
 
+class ScanCompleteTrigger : public Trigger<> {
+ public:
+  explicit ScanCompleteTrigger(HDMICEC *parent) { parent->add_scan_complete_trigger(this); }
+};
+
+class ScanButton : public button::Button {
+ public:
+  void set_parent(HDMICEC *parent) { parent_ = parent; }
+
+ protected:
+  void press_action() override { parent_->start_scan(); }
+  HDMICEC *parent_;
+};
+
+template<typename... Ts> class ScanBusAction : public Action<Ts...> {
+ public:
+  ScanBusAction(HDMICEC *parent) : parent_(parent) {}
+  void play(const Ts &...x) override { parent_->start_scan(); }
+
+ protected:
+  HDMICEC *parent_;
+};
+
 template<typename... Ts> class SendAction : public Action<Ts...> {
-public:
+ public:
   SendAction(HDMICEC *parent) : parent_(parent) {}
   TEMPLATABLE_VALUE(uint8_t, source)
   TEMPLATABLE_VALUE(uint8_t, destination)
   TEMPLATABLE_VALUE(std::vector<uint8_t>, data)
 
-  void play(const Ts&... x) override {
+  void play(const Ts &...x) override {
     auto source_address = source_.has_value() ? source_.value(x...) : parent_->address();
     auto destination_address = destination_.value(x...);
     auto data = data_.value(x...);
     parent_->send(source_address, destination_address, data);
   }
 
-protected:
+ protected:
   HDMICEC *parent_;
 };
 
-}
-}
+template<typename... Ts> class SendToOsdNameAction : public Action<Ts...> {
+ public:
+  SendToOsdNameAction(HDMICEC *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(uint8_t, source)
+  TEMPLATABLE_VALUE(std::string, osd_name)
+  TEMPLATABLE_VALUE(std::vector<uint8_t>, data)
+
+  void play(const Ts &...x) override {
+    auto source_address = source_.has_value() ? source_.value(x...) : parent_->address();
+    parent_->send_to_osd_name(source_address, osd_name_.value(x...), data_.value(x...));
+  }
+
+ protected:
+  HDMICEC *parent_;
+};
+
+template<typename... Ts> class SendToPhysicalAddressAction : public Action<Ts...> {
+ public:
+  SendToPhysicalAddressAction(HDMICEC *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(uint8_t, source)
+  TEMPLATABLE_VALUE(uint16_t, physical_address)
+  TEMPLATABLE_VALUE(std::vector<uint8_t>, data)
+
+  void play(const Ts &...x) override {
+    auto source_address = source_.has_value() ? source_.value(x...) : parent_->address();
+    parent_->send_to_physical_address(source_address, physical_address_.value(x...), data_.value(x...));
+  }
+
+ protected:
+  HDMICEC *parent_;
+};
+
+template<typename... Ts> class SendToVendorAndTypeAction : public Action<Ts...> {
+ public:
+  SendToVendorAndTypeAction(HDMICEC *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(uint8_t, source)
+  TEMPLATABLE_VALUE(uint32_t, vendor_id)
+  TEMPLATABLE_VALUE(uint8_t, device_type)
+  TEMPLATABLE_VALUE(std::vector<uint8_t>, data)
+
+  void play(const Ts &...x) override {
+    auto source_address = source_.has_value() ? source_.value(x...) : parent_->address();
+    parent_->send_to_vendor_and_type(source_address, vendor_id_.value(x...), device_type_.value(x...),
+                                     data_.value(x...));
+  }
+
+ protected:
+  HDMICEC *parent_;
+};
+
+class CECRemoteDevice
+#ifdef USE_API_CUSTOM_SERVICES
+    : public api::CustomAPIDevice
+#endif
+{
+ public:
+  void set_parent(HDMICEC *parent) { parent_ = parent; }
+  void set_name(const char *name) { name_ = name; }
+  const char *get_name() const { return name_; }
+  void set_yaml_id(const char *id) { yaml_id_ = id; }
+
+  void set_match_osd_name(const std::string &name) { match_osd_name_ = name; }
+  void set_match_physical_address(uint16_t addr) { match_physical_address_ = addr; }
+  void set_match_vendor_id(uint32_t id) { match_vendor_id_ = id; }
+  void set_match_device_type(uint8_t type) { match_device_type_ = type; }
+
+  void set_power_switch(switch_::Switch *sw) { power_switch_ = sw; }
+  void set_osd_name_sensor(text_sensor::TextSensor *s) { osd_name_sensor_ = s; }
+  void set_device_type_sensor(text_sensor::TextSensor *s) { device_type_sensor_ = s; }
+  void set_vendor_id_sensor(text_sensor::TextSensor *s) { vendor_id_sensor_ = s; }
+  void set_vendor_name_sensor(text_sensor::TextSensor *s) { vendor_name_sensor_ = s; }
+  void set_physical_address_sensor(text_sensor::TextSensor *s) { physical_address_sensor_ = s; }
+  void set_power_status_sensor(text_sensor::TextSensor *s) { power_status_sensor_ = s; }
+  void set_cec_version_sensor(text_sensor::TextSensor *s) { cec_version_sensor_ = s; }
+  void set_active_source_sensor(binary_sensor::BinarySensor *s) { active_source_sensor_ = s; }
+  void set_last_seen_sensor(text_sensor::TextSensor *s) { last_seen_sensor_ = s; }
+
+  bool matches(const CECDevice &dev) const;
+  void on_device_update(const CECDevice &dev);
+  optional<uint8_t> get_address() const { return resolved_address_; }
+  bool needs_power_poll() const { return power_switch_ != nullptr || power_status_sensor_ != nullptr; }
+
+#ifdef USE_API_CUSTOM_SERVICES
+  void register_api_service_();
+  void on_api_send_(std::vector<int32_t> data);
+#endif
+
+ protected:
+  HDMICEC *parent_{nullptr};
+  const char *name_{""};
+  const char *yaml_id_{""};
+
+  optional<std::string> match_osd_name_;
+  optional<uint16_t> match_physical_address_;
+  optional<uint32_t> match_vendor_id_;
+  optional<uint8_t> match_device_type_;
+
+  optional<uint8_t> resolved_address_;
+
+  switch_::Switch *power_switch_{nullptr};
+  text_sensor::TextSensor *osd_name_sensor_{nullptr};
+  text_sensor::TextSensor *device_type_sensor_{nullptr};
+  text_sensor::TextSensor *vendor_id_sensor_{nullptr};
+  text_sensor::TextSensor *vendor_name_sensor_{nullptr};
+  text_sensor::TextSensor *physical_address_sensor_{nullptr};
+  text_sensor::TextSensor *power_status_sensor_{nullptr};
+  text_sensor::TextSensor *cec_version_sensor_{nullptr};
+  binary_sensor::BinarySensor *active_source_sensor_{nullptr};
+  text_sensor::TextSensor *last_seen_sensor_{nullptr};
+};
+
+class CECControlButton : public button::Button {
+ public:
+  void set_parent(HDMICEC *parent) { parent_ = parent; }
+  void set_remote_device(CECRemoteDevice *dev) { device_ = dev; }
+  void set_ui_command(uint8_t cmd) { ui_command_ = cmd; }
+
+ protected:
+  void press_action() override;
+  HDMICEC *parent_{nullptr};
+  CECRemoteDevice *device_{nullptr};
+  uint8_t ui_command_{0};
+};
+
+class CECPowerSwitch : public switch_::Switch {
+ public:
+  void set_parent(HDMICEC *parent) { parent_ = parent; }
+  void set_remote_device(CECRemoteDevice *dev) { device_ = dev; }
+
+ protected:
+  void write_state(bool state) override;
+  HDMICEC *parent_{nullptr};
+  CECRemoteDevice *device_{nullptr};
+};
+
+template<typename... Ts> class SendToDeviceAction : public Action<Ts...> {
+ public:
+  SendToDeviceAction(HDMICEC *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(uint8_t, source)
+  TEMPLATABLE_VALUE(std::vector<uint8_t>, data)
+  void set_device(CECRemoteDevice *dev) { device_ = dev; }
+
+  void play(const Ts &...x) override {
+    auto source_address = source_.has_value() ? source_.value(x...) : parent_->address();
+    auto data = data_.value(x...);
+    auto addr = device_->get_address();
+    if (addr.has_value()) {
+      parent_->send(source_address, *addr, data);
+    } else {
+      ESP_LOGW("hdmi_cec", "send_to_device: device '%s' not found on bus", device_->get_name());
+    }
+  }
+
+ protected:
+  HDMICEC *parent_;
+  CECRemoteDevice *device_{nullptr};
+};
+
+class CECPowerPollNumber : public number::Number, public Component {
+ public:
+  void set_parent(HDMICEC *parent) { parent_ = parent; }
+  float get_setup_priority() const override { return setup_priority::HARDWARE - 1.0f; }
+  void setup() override;
+
+ protected:
+  void control(float value) override {
+    publish_state(value);
+    parent_->set_power_poll_interval(static_cast<uint32_t>(value));
+    pref_.save(&value);
+  }
+  HDMICEC *parent_{nullptr};
+  ESPPreferenceObject pref_;
+};
+
+}  // namespace hdmi_cec
+}  // namespace esphome

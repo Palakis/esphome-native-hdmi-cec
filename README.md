@@ -17,6 +17,12 @@ Make your ESPHome devices speak the (machine) language of your living room with 
       - _"Give OSD Name"_
 - Send CEC commands
     - Built-in `hdmi_cec.send` action
+- Bus scanning & device discovery
+    - Automatic scan on startup with configurable delay
+    - On-demand scanning via `hdmi_cec.scan_bus` action
+    - Device registry with OSD name, physical address, vendor ID, power status, and more
+    - Query devices by logical address, OSD name, physical address, or vendor/type
+    - Passive registry updates from broadcast messages
 
 ### To-do list
 
@@ -67,22 +73,22 @@ Add the `hdmi_cec:` block:
 hdmi_cec:
   # Pick a GPIO pin that can do both input AND output
   pin: GPIO26 # Required
-  
-  # The address can be anything you want. Use 0xF if you only want to listen to the bus and not act like a standard device
-  address: 0xE # Required
-  
+
+  # The type of CEC device to present as. Used for automatic logical address negotiation.
+  # Options: tv, recording_device, tuner, playback_device, audio_system, other
+  # device_type: playback_device # Optional. Defaults to "other"
+
   # Physical address of the device. In this case: 4.0.0.0 (HDMI4 on the TV)
   # DDC support is not yet implemented, so you'll have to set this manually.
   physical_address: 0x4000 # Required
-  
+
   # The name that will be displayed in the list of devices on your TV/receiver
   osd_name: "my device" # Optional. Defaults to "esphome"
-  
-  # By default, promiscuous mode is disabled, so the component only handles directly-address messages (matching
-  # the address configured above) and broadcast messages. Enabling promiscuous mode will make the component
+
+  # By default, promiscuous mode is disabled, so the component only handles directly-addressed messages and broadcast messages. Enabling promiscuous mode will make the component
   # listen for all messages (both in logs and the on_message triggers)
   promiscuous_mode: false # Optional. Defaults to false
-  
+
   # By default, monitor mode is disabled, so the component can send messages and acknowledge incoming messages.
   # Enabling monitor mode lets the component act as a passive listener, disabling active manipulation of the CEC bus.
   monitor_mode: false # Optional. Defaults to false
@@ -90,6 +96,37 @@ hdmi_cec:
 ```
 
 You now have a functioning CEC receiver.
+
+> **Note on `address` (backward-compatibility only):** The `address` option still exists for backward
+> compatibility, allowing you to hard-code a logical address (e.g., `address: 0xE`). However, this is
+> **strongly discouraged** because it bypasses the CEC bus negotiation protocol: if another device on
+> the bus already uses the same address, both devices will malfunction (garbled commands, missed
+> messages, or devices disappearing from the TV's device list). Using `device_type` lets the component
+> negotiate a free address automatically at startup, which is the correct behavior per the HDMI-CEC
+> specification. A compile-time warning is emitted when `address` is used.
+
+---
+
+## Entities
+
+The component automatically creates the following Home Assistant entities. No configuration is needed — they appear as soon as the component is loaded. Each can be customized under the `hdmi_cec:` block (e.g. to change the name or icon).
+
+| Entity | Type | Category | Description |
+| ------ | ---- | -------- | ----------- |
+| Logical Address | Text sensor | Diagnostic | The CEC logical address negotiated at startup (e.g. `0x4`) |
+| Scan CEC Bus | Button | Diagnostic | Triggers an on-demand scan of the CEC bus |
+
+**Customization example:**
+
+```yaml
+hdmi_cec:
+  ...
+  logical_address:
+    name: "CEC Address"
+    icon: "mdi:hdmi-port"
+  scan_bus:
+    name: "Rescan CEC Devices"
+```
 
 ---
 
@@ -150,24 +187,37 @@ button:
 
 ---
 
-### 3. Enable CEC Commands via Home Assistant Services
+### 3. Home Assistant Services
 
-Under `api:`:
+Enable `custom_services: true` in your `api:` config to automatically register CEC services in Home Assistant:
 
 ```yaml
 api:
-  services:
-    - service: hdmi_cec_send
-      variables:
-        cec_destination: int
-        cec_data: int[]
-      then:
-        - hdmi_cec.send:
-            destination: !lambda "return static_cast<unsigned char>(cec_destination);"
-            data: !lambda |-
-              std::vector<unsigned char> vec;
-              for (int i : cec_data) vec.push_back(static_cast<unsigned char>(i));
-              return vec;
+  custom_services: true
+```
+
+This exposes the following services:
+
+| Service | Parameters | Description |
+|---------|-----------|-------------|
+| `esphome.<node>_send` | `destination` (int), `data` (int[]) | Send a raw CEC command |
+| `esphome.<node>_send_to_osd_name` | `osd_name` (string), `data` (int[]) | Send to a device by its OSD name |
+| `esphome.<node>_send_to_physical_address` | `physical_address` (int), `data` (int[]) | Send to a device by physical address |
+| `esphome.<node>_send_to_vendor_and_type` | `vendor_id` (int), `device_type` (int), `data` (int[]) | Send to a device by vendor ID and type |
+| `esphome.<node>_scan_bus` | _(none)_ | Trigger a CEC bus scan |
+
+Note that logical addresses are **subject to change** and so the send_to_* variants are more stable options, depending on your devices and needs:
+- OSD name is stable, if the device provides it, and as long as it isn't changed by device settings.
+- Phyiscal address is based on the phyiscal ports that your devices are plugged into. It is stable if and only if you leave devices you care about plugged into the same ports.
+- Vendor ID + Device Type is always stable, assuming you only have one matching device in your HDMI tree.
+
+**Example HA service call** (Developer Tools > Services):
+
+```yaml
+service: esphome.hdmi_cec_bridge_send
+data:
+  destination: 0
+  data: [0x04]  # Image View On (turn TV on)
 ```
 
 ---
@@ -257,6 +307,196 @@ hdmi_cec:
 
 ---
 
+### 6. Bus Scanning & Device Discovery
+
+The component can scan the CEC bus to discover connected devices and collect their information. Scanning is non-blocking and runs asynchronously in the background.
+
+#### Configuration
+
+```yaml
+hdmi_cec:
+  id: cec
+  pin: GPIO26
+  physical_address: 0x4000
+  device_type: playback_device
+
+  # Scan the bus on startup (default: true)
+  scan_on_boot: true
+
+  # Delay before the initial scan, to let other devices finish negotiation (default: 3s)
+  scan_boot_delay: 3s
+
+  # Trigger when a scan completes
+  on_scan_complete:
+    - then:
+        - logger.log: "CEC bus scan complete"
+```
+
+Scan results are logged at INFO level. To expose device state as entities in Home Assistant, see "User-Defined CEC Devices" below.
+
+#### Triggering a scan manually
+
+Use the `hdmi_cec.scan_bus` action from any automation:
+
+```yaml
+button:
+  - platform: template
+    name: "Scan CEC Bus"
+    on_press:
+      - hdmi_cec.scan_bus
+```
+
+#### Querying the device registry from lambdas
+
+The scan populates a per-device registry (logical addresses 0-14) with the following fields:
+
+| Field | Type | Default (unknown) | Source |
+|-------|------|--------------------|--------|
+| `device_type` | `uint8_t` | `0xFF` | Report Physical Address |
+| `physical_address` | `uint16_t` | `0xFFFF` | Report Physical Address |
+| `osd_name` | `std::string` | `""` | Set OSD Name |
+| `vendor_id` | `uint32_t` | `0xFFFFFF` | Device Vendor ID |
+| `power_status` | `uint8_t` | `0xFF` | Report Power Status |
+| `cec_version` | `uint8_t` | `0xFF` | CEC Version |
+| `active_source` | `bool` | `false` | Active Source broadcast |
+| `last_seen_ms` | `uint32_t` | `0` | Any response from device |
+
+Available query methods:
+
+```cpp
+// Get info for a specific logical address
+auto &dev = id(cec).get_device(0);  // TV is usually address 0
+
+// Check if a device was seen on the most recent scan
+bool tv_present = id(cec).seen_on_last_scan(0);
+
+// Find a device by OSD name
+auto addr = id(cec).find_address_by_osd_name("Samsung TV");
+if (addr.has_value()) { /* use *addr */ }
+
+// Find a device by physical address
+auto addr = id(cec).find_address_by_physical_address(0x1000);
+
+// Find a device by vendor ID and device type (useful for devices without OSD names)
+auto addr = id(cec).find_address_by_vendor_and_type(0x000678, 0x04);  // e.g., Panasonic playback device
+
+// Check if a scan is currently running
+bool scanning = id(cec).is_scanning();
+```
+
+The registry is also updated passively from broadcast messages (Report Physical Address, Device Vendor ID, Active Source) even outside of active scans.
+
+---
+
+### 7. User-Defined CEC Devices
+
+Define specific CEC devices you want to interact with under `devices:`. Each device becomes an ESPHome sub-device with its own entity group in Home Assistant. Only the entities you configure are created, keeping memory usage low.
+
+All entity keys below are optional. A bare key (e.g. `power_switch:`) creates the entity with a default name of `"{device name} {label}"` — Home Assistant strips the device name prefix when displaying under the sub-device card, so `"Blu-ray Player Power"` shows as **Power**.
+
+#### Example
+
+```yaml
+hdmi_cec:
+  id: cec
+  pin: GPIO26
+  physical_address: 0x4000
+  scan_on_boot: true
+
+  devices:
+    - id: bluray
+      name: "Blu-ray Player"
+      match:
+        osd_name: "BD Player"
+        vendor_id: 0x080046
+      power_switch:
+        name: "BD Power"
+        icon: "mdi:disc-player"
+      power_status_sensor:
+        name: "BD Status"
+        icon: "mdi:power-settings"
+      active_source_sensor:
+      navigation_buttons:
+      transport_buttons:
+
+    - id: soundbar
+      name: "Soundbar"
+      match:
+        vendor_id: 0x0000F0
+        device_type: audio_system
+      power_switch:
+      volume_buttons:
+```
+
+#### Device matching
+
+Each device requires a `match:` block with at least one criterion. All criteria are AND-combined. After a bus scan (or from ongoing CEC traffic), the component resolves each device to its current logical address.
+
+| Key | Type | Description | Stability | Uniqueness |
+|-----|------|-------------|-----------|------------|
+| `osd_name` | string | Match by the device's on-screen display name | As long as it's not changed in device settings (if applicable.) Not reported by all devices. | Maybe? |
+| `vendor_id` | int | Match by 24-bit vendor ID (e.g. `0x080046`) | Never changes | Depends on your devices |
+| `device_type` | enum | Match by device type: `tv`, `recording_device`, `tuner`, `playback_device`, `audio_system`, `other` | Never changes | Depends on your devices |
+| `physical_address` | int | Match by 16-bit HDMI topology address (e.g. `0x2000`) | Changes if/when you move it to a different plug | Always unquie |
+
+#### Power switch
+
+Sends Image View On (power on) or Standby (power off). Use a bare key for defaults, or customize with any options from [Switch](https://esphome.io/components/switch/).
+
+#### Sensors
+
+Each sensor key can be a bare key or customized with standard options.
+
+| Key | Type | Default label | Description |
+|-----|------|---------------|-------------|
+| `osd_name_sensor` | Text | OSD Name | Device's on-screen display name |
+| `device_type_sensor` | Text | Device Type | TV, Playback Device, Audio System, etc. |
+| `vendor_id_sensor` | Text | Vendor ID | Hex string (e.g. "0x080046") |
+| `vendor_name_sensor` | Text | Vendor Name | Manufacturer (e.g. "Sony") |
+| `physical_address_sensor` | Text | Physical Address | HDMI topology address (e.g. "2.0.0.0") |
+| `power_status_sensor` | Text | Power Status | On / Standby / Transitioning |
+| `cec_version_sensor` | Text | CEC Version | Protocol version string |
+| `active_source_sensor` | Binary | Active Source | Whether this device is the active HDMI source |
+| `last_seen_sensor` | Text | Last Seen | Time since last bus activity |
+
+All other options from [Text Sensor](https://esphome.io/components/text_sensor/) or [Binary Sensor](https://esphome.io/components/binary_sensor/) depending on the type above.
+
+#### Button groups
+
+Each key creates a group of [Button](https://esphome.io/components/button/) entities that send CEC User Control Pressed + Released commands to the device. These are bare keys only — they take no sub-options. Individual button names and icons are auto-generated.
+
+| Key | Buttons created |
+|-----|-----------------|
+| `navigation_buttons` | Select, Up, Down, Left, Right, Root Menu, Back |
+| `transport_buttons` | Play, Stop, Pause, Record, Rewind, Fast Forward, Play/Pause |
+| `volume_buttons` | Volume Up, Volume Down, Mute |
+| `power_buttons` | Power Toggle, Power Off, Power On |
+| `number_buttons` | 0–9, Dot, Enter, Clear, Number Entry Mode, 11, 12 |
+| `channel_buttons` | Channel Up, Channel Down, Previous Channel |
+| `color_buttons` | Blue, Red, Green, Yellow |
+
+#### Sending to a device by ID
+
+Use the `hdmi_cec.send_to_device` action to send raw CEC data to a user-defined device. The device's logical address is resolved automatically from the match criteria.
+
+```yaml
+on_...:
+  then:
+    - hdmi_cec.send_to_device:
+        device: bluray
+        data: [0x44, 0x00]  # User Control Pressed: Select
+```
+
+Each device also gets an automatic Home Assistant service: `esphome.<node>_send_to_device_<id>` with a single `data` (int[]) parameter. For example, with `id: bluray`:
+
+```yaml
+service: esphome.hdmi_cec_bridge_send_to_device_bluray
+data:
+  data: [0x44, 0x00]  # User Control Pressed: Select
+```
+
+---
+
 ## Advanced Example (All Features Combined)
 
 Here’s a full YAML snippet that includes all optional features together (just delete what you don't need):
@@ -278,16 +518,8 @@ logger:
 api:
   encryption:
     key: "..."
-  
-  services:
-    - service: hdmi_cec_send
-      variables:
-        cec_destination: int
-        cec_data: int[]
-      then:
-        - hdmi_cec.send:
-            destination: !lambda "return static_cast<unsigned char>(cec_destination);"
-            data: !lambda "std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;"
+  # Enable CEC services (send, scan_bus, etc.) in Home Assistant
+  custom_services: true
 
 ota:
   - platform: esphome
@@ -316,22 +548,22 @@ external_components:
 hdmi_cec:
   # Pick a GPIO pin that can do both input AND output
   pin: GPIO10 # Required
-  
-  # The address can be anything you want. Use 0xF if you only want to listen to the bus and not act like a standard device
-  address: 0xE # Required
-  
+
+  # The type of CEC device to present as. Used for automatic logical address negotiation.
+  # Options: tv, recording_device, tuner, playback_device, audio_system, other
+  device_type: playback_device # Optional. Defaults to "other"
+
   # Physical address of the device. In this case: 4.2.0.0 (The ESP32 is plugged into HDMI 2 on the receiver which is plugged into HDMI4 on the TV)
   # DDC support is not yet implemented, so you'll have to set this manually.
   physical_address: 0x4200 # Required
-  
+
   # The name that will be displayed in the list of devices on your TV/receiver
   osd_name: "HDMI Bridge" # Optional. Defaults to "esphome"
-  
-  # By default, promiscuous mode is disabled, so the component only handles directly addressed messages (matching
-  # the address configured above) and broadcast messages. Enabling promiscuous mode will make the component
+
+  # By default, promiscuous mode is disabled, so the component only handles directly-addressed messages and broadcast messages. Enabling promiscuous mode will make the component
   # listen for all messages (both in logs and the on_message triggers)
   promiscuous_mode: true # Optional. Defaults to false
-  
+
   # By default, monitor mode is disabled, so the component can send messages and acknowledge incoming messages.
   # Enabling monitor mode lets the component act as a passive listener, disabling active manipulation of the CEC bus.
   monitor_mode: false # Optional. Defaults to false

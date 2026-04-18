@@ -8,6 +8,8 @@ external_components:
 
 esp32:
   board: esp32dev
+  framework:
+    type: esp-idf
 
 # Enable logging
 logger:
@@ -16,17 +18,8 @@ logger:
 api:
   encryption:
     key: !secret encryption_key
-  services:
-    - service: hdmi_cec_send
-      variables:
-        cec_source: int
-        cec_destination: int
-        cec_data: int[]
-      then:
-        - hdmi_cec.send:
-            source: !lambda "return static_cast<unsigned char>(cec_source);"
-            destination: !lambda "return static_cast<unsigned char>(cec_destination);"
-            data: !lambda "std::vector<unsigned char> charVector; for (int i : cec_data) { charVector.push_back(static_cast<unsigned char>(i)); } return charVector;"
+  # Enable CEC services (send, scan_bus, etc.) in Home Assistant
+  custom_services: true
 
 # Enable OTA
 ota:
@@ -44,9 +37,14 @@ wifi:
 captive_portal:
 
 hdmi_cec:
+  id: cec
   pin: GPIO26
-  address: 0x5
   physical_address: 0x4000
+  scan_on_boot: true
+  scan_boot_delay: 3s
+  on_scan_complete:
+    - then:
+        - logger.log: "CEC bus scan complete"
   on_message:
     # Volume Up
     - data: [0x44, 0x41]
@@ -62,3 +60,24 @@ hdmi_cec:
     - data: [0x44, 0x43]
       then:
         - logger.log: "Mute"
+
+  devices:
+    - id: bluray
+      name: "Blu-ray Player"
+      match:
+        osd_name: "BD Player"
+      power_switch:
+      osd_name_sensor:
+      power_status_sensor:
+      active_source_sensor:
+      last_seen_sensor:
+      navigation_buttons:
+      transport_buttons:
+
+    - id: soundbar
+      name: "Soundbar"
+      match:
+        vendor_id: 0x0000F0
+        device_type: audio_system
+      power_switch:
+      volume_buttons:

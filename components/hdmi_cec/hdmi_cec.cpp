@@ -1,4 +1,5 @@
 #include "hdmi_cec.h"
+
 #include "esphome/core/log.h"
 
 #ifdef USE_CEC_DECODER
@@ -19,6 +20,30 @@ static const uint32_t HIGH_BIT_US = 600;
 static const uint32_t LOW_BIT_US = 1500;
 // arbitration and retransmission
 static const size_t MAX_ATTEMPTS = 5;
+
+// Scan query chain: each entry is {request_opcode, response_opcode}.
+// During a bus scan, we send queries in this order and chain the next
+// query when we receive the expected response.
+struct ScanQuery {
+  uint8_t request;
+  uint8_t response;
+};
+static const ScanQuery SCAN_QUERIES[] = {
+    {CEC_OPCODE_GIVE_PHYSICAL_ADDRESS, CEC_OPCODE_REPORT_PHYSICAL_ADDRESS},
+    {CEC_OPCODE_GIVE_DEVICE_VENDOR_ID, CEC_OPCODE_DEVICE_VENDOR_ID},
+    {CEC_OPCODE_GET_CEC_VERSION, CEC_OPCODE_CEC_VERSION},
+    {CEC_OPCODE_GIVE_OSD_NAME, CEC_OPCODE_SET_OSD_NAME},
+    {CEC_OPCODE_GIVE_DEVICE_POWER_STATUS, CEC_OPCODE_REPORT_POWER_STATUS},
+};
+static const size_t SCAN_QUERY_COUNT = sizeof(SCAN_QUERIES) / sizeof(SCAN_QUERIES[0]);
+
+static bool is_scan_response_opcode(uint8_t opcode) {
+  for (size_t i = 0; i < SCAN_QUERY_COUNT; i++) {
+    if (opcode == SCAN_QUERIES[i].response)
+      return true;
+  }
+  return false;
+}
 
 static const gpio::Flags INPUT_MODE_FLAGS = gpio::FLAG_INPUT | gpio::FLAG_PULLUP;
 static const gpio::Flags OUTPUT_MODE_FLAGS = gpio::FLAG_OUTPUT | gpio::FLAG_OPEN_DRAIN;
@@ -55,9 +80,7 @@ std::string Frame::to_string(bool skip_decode) const {
   return result;
 }
 
-inline void IRAM_ATTR HDMICEC::set_pin_input_high() {
-  pin_->pin_mode(INPUT_MODE_FLAGS);
-}
+inline void IRAM_ATTR HDMICEC::set_pin_input_high() { pin_->pin_mode(INPUT_MODE_FLAGS); }
 
 inline void IRAM_ATTR HDMICEC::set_pin_output_low() {
   pin_->pin_mode(OUTPUT_MODE_FLAGS);
@@ -65,17 +88,52 @@ inline void IRAM_ATTR HDMICEC::set_pin_output_low() {
 }
 
 void HDMICEC::setup() {
-  this->pin_->setup();  
+  this->pin_->setup();
   isr_pin_ = pin_->to_isr();
   frames_queue_.reset();
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   set_pin_input_high();
+
+  if (negotiation_needed_) {
+    negotiate_address_();
+    broadcast_physical_address_();
+  }
+
+  if (address_sensor_ != nullptr) {
+    char buf[5];
+    sprintf(buf, "0x%X", address_);
+    address_sensor_->publish_state(buf);
+  }
+
+  if (scan_on_boot_ && !monitor_mode_) {
+    set_timeout("scan_boot", scan_boot_delay_ms_, [this]() { start_scan(); });
+  }
+
+#ifdef USE_API_CUSTOM_SERVICES
+  register_service(&HDMICEC::on_send_, "send", {"destination", "data"});
+  register_service(&HDMICEC::on_send_to_osd_name_, "send_to_osd_name", {"osd_name", "data"});
+  register_service(&HDMICEC::on_send_to_physical_address_, "send_to_physical_address", {"physical_address", "data"});
+  register_service(&HDMICEC::on_send_to_vendor_and_type_, "send_to_vendor_and_type",
+                   {"vendor_id", "device_type", "data"});
+  register_service(&HDMICEC::on_scan_bus_, "scan_bus");
+  for (auto *dev : remote_devices_) {
+    dev->register_api_service_();
+  }
+#elif defined(USE_API)
+#warning \
+    "hdmi_cec: HA services (send, scan_bus, etc.) are disabled. Add 'custom_services: true' to your 'api:' config to enable them."
+#endif
+
+  set_power_poll_interval(power_poll_interval_ms_);
+  if (power_poll_number_ != nullptr) {
+    power_poll_number_->publish_state(power_poll_interval_ms_);
+  }
 }
 
 void HDMICEC::dump_config() {
   ESP_LOGCONFIG(TAG, "HDMI-CEC");
   LOG_PIN("  pin: ", pin_);
-  ESP_LOGCONFIG(TAG, "  address: %x", address_);
+  ESP_LOGCONFIG(TAG, "  address: 0x%X", address_);
   ESP_LOGCONFIG(TAG, "  promiscuous mode: %s", (promiscuous_mode_ ? "yes" : "no"));
   ESP_LOGCONFIG(TAG, "  monitor mode: %s", (monitor_mode_ ? "yes" : "no"));
 }
@@ -86,7 +144,7 @@ void HDMICEC::loop() {
     uint8_t src_addr = ((header & 0xF0) >> 4);
     uint8_t dest_addr = (header & 0x0F);
 
-    if (!promiscuous_mode_ && (dest_addr != 0x0F) && (dest_addr != address_)) {
+    if (!promiscuous_mode_ && (dest_addr != CEC_ADDR_BROADCAST) && (dest_addr != address_)) {
       // ignore frames not meant for us, recycle frame buffer
       frames_queue_.push_front();
       continue;
@@ -106,18 +164,19 @@ void HDMICEC::loop() {
     // recycle received frame buffer
     frames_queue_.push_front();
 
+    // Always update device registry from known response opcodes
+    update_devices_(src_addr, dest_addr, data);
+
     // Process on_message triggers
     bool handled_by_trigger = false;
     uint8_t opcode = data[0];
     for (auto trigger : message_triggers_) {
-      bool can_trigger = (
-        (!trigger->source_.has_value()      || (trigger->source_ == src_addr)) &&
-        (!trigger->destination_.has_value() || (trigger->destination_ == dest_addr)) &&
-        (!trigger->opcode_.has_value()      || (trigger->opcode_ == opcode)) &&
-        (!trigger->data_.has_value() ||
-          (data.size() == trigger->data_->size() && std::equal(trigger->data_->begin(), trigger->data_->end(), data.begin()))
-        )
-      );
+      bool can_trigger =
+          ((!trigger->source_.has_value() || (trigger->source_ == src_addr)) &&
+           (!trigger->destination_.has_value() || (trigger->destination_ == dest_addr)) &&
+           (!trigger->opcode_.has_value() || (trigger->opcode_ == opcode)) &&
+           (!trigger->data_.has_value() || (data.size() == trigger->data_->size() &&
+                                            std::equal(trigger->data_->begin(), trigger->data_->end(), data.begin()))));
       if (can_trigger) {
         trigger->trigger(src_addr, dest_addr, data);
         handled_by_trigger = true;
@@ -125,44 +184,362 @@ void HDMICEC::loop() {
     }
 
     // If nothing in on_message handled this message, we try to run the built-in handlers
-    bool is_directly_addressed = (dest_addr != 0xF && dest_addr == address_);
+    bool is_directly_addressed = (dest_addr != CEC_ADDR_BROADCAST && dest_addr == address_);
     if (is_directly_addressed && !handled_by_trigger) {
       try_builtin_handler_(src_addr, dest_addr, data);
+    }
+  }
+
+  // Send one initial probe per loop iteration during scan
+  if (scanning_) {
+    for (uint8_t i = 0; i <= CEC_ADDR_MAX_ASSIGNABLE; i++) {
+      if (scan_pending_[i]) {
+        scan_pending_[i] = false;
+        send(address_, i, {SCAN_QUERIES[0].request});
+        break;
+      }
     }
   }
 }
 
 uint8_t logical_address_to_device_type(uint8_t logical_address) {
   switch (logical_address) {
-    // "TV"
-    case 0x0:
-      return 0x00; // "TV"
-
-    // "Audio System"
-    case 0x5:
-      return 0x05; // "Audio System"
-
-    // "Recording 1"
-    case 0x1:
-    // "Recording 2"
-    case 0x2:
-    // "Recording 3"
-    case 0x9:
-      return 0x01; // "Recording Device"
-
-    // "Tuner 1"
-    case 0x3:
-    // "Tuner 2"
-    case 0x6:
-    // "Tuner 3"
-    case 0x7:
-    // "Tuner 4"
-    case 0xA:
-      return 0x03; // "Tuner"
-
+    case CEC_ADDR_TV:
+      return CEC_DEVICE_TYPE_TV;
+    case CEC_ADDR_AUDIO_SYSTEM:
+      return CEC_DEVICE_TYPE_AUDIO_SYSTEM;
+    case CEC_ADDR_RECORDING_1:
+    case CEC_ADDR_RECORDING_2:
+    case CEC_ADDR_RECORDING_3:
+      return CEC_DEVICE_TYPE_RECORDING;
+    case CEC_ADDR_TUNER_1:
+    case CEC_ADDR_TUNER_2:
+    case CEC_ADDR_TUNER_3:
+    case CEC_ADDR_TUNER_4:
+      return CEC_DEVICE_TYPE_TUNER;
+    case CEC_ADDR_PLAYBACK_1:
+    case CEC_ADDR_PLAYBACK_2:
+    case CEC_ADDR_PLAYBACK_3:
+      return CEC_DEVICE_TYPE_PLAYBACK;
     default:
-      return 0x04; // "Playback Device"
+      return CEC_DEVICE_TYPE_OTHER;
   }
+}
+
+static const std::vector<uint8_t> &device_type_to_candidate_addresses(uint8_t device_type) {
+  static const std::vector<uint8_t> TV_ADDRS = {CEC_ADDR_TV};
+  static const std::vector<uint8_t> RECORDING_ADDRS = {CEC_ADDR_RECORDING_1, CEC_ADDR_RECORDING_2,
+                                                       CEC_ADDR_RECORDING_3};
+  static const std::vector<uint8_t> TUNER_ADDRS = {CEC_ADDR_TUNER_1, CEC_ADDR_TUNER_2, CEC_ADDR_TUNER_3,
+                                                   CEC_ADDR_TUNER_4};
+  static const std::vector<uint8_t> PLAYBACK_ADDRS = {CEC_ADDR_PLAYBACK_1, CEC_ADDR_PLAYBACK_2, CEC_ADDR_PLAYBACK_3};
+  static const std::vector<uint8_t> AUDIO_ADDRS = {CEC_ADDR_AUDIO_SYSTEM};
+  static const std::vector<uint8_t> OTHER_ADDRS = {CEC_ADDR_FREE_USE, CEC_ADDR_RESERVED_2, CEC_ADDR_RESERVED_1};
+
+  switch (device_type) {
+    case CEC_DEVICE_TYPE_TV:
+      return TV_ADDRS;
+    case CEC_DEVICE_TYPE_RECORDING:
+      return RECORDING_ADDRS;
+    case CEC_DEVICE_TYPE_TUNER:
+      return TUNER_ADDRS;
+    case CEC_DEVICE_TYPE_PLAYBACK:
+      return PLAYBACK_ADDRS;
+    case CEC_DEVICE_TYPE_AUDIO_SYSTEM:
+      return AUDIO_ADDRS;
+    default:
+      return OTHER_ADDRS;
+  }
+}
+
+bool HDMICEC::test_address_available_(uint8_t candidate_address) {
+  // Send a polling message: header-only frame where source == destination
+  Frame frame(candidate_address, candidate_address, {});
+
+  // Wait for signal free time (5 bit periods for new initiator)
+  int32_t delay = 5 * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros();
+  if (delay > 0) {
+    delay_microseconds_safe(delay);
+  }
+
+  // For a directed message (non-broadcast), send_frame_ returns:
+  //   Success if ACKed (another device has this address)
+  //   NoAck if not ACKed (address is free)
+  auto result = send_frame_(frame, false);
+  last_sent_us_ = micros();
+
+  if (result == SendResult::NoAck) {
+    ESP_LOGD(TAG, "Address 0x%X is free", candidate_address);
+    return true;
+  }
+  ESP_LOGD(TAG, "Address 0x%X is taken (result=%d)", candidate_address, (int) result);
+  return false;
+}
+
+void HDMICEC::negotiate_address_() {
+  if (!device_type_.has_value()) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Starting CEC logical address negotiation");
+
+  address_ = CEC_ADDR_BROADCAST;  // Unregistered during negotiation
+
+  const auto &candidates = device_type_to_candidate_addresses(device_type_.value());
+
+  LockGuard send_lock(send_mutex_);
+
+  // First, try the spec-preferred addresses for our device type
+  for (uint8_t candidate : candidates) {
+    if (test_address_available_(candidate)) {
+      address_ = candidate;
+      ESP_LOGI(TAG, "Claimed logical address 0x%X", address_);
+      return;
+    }
+  }
+
+  // All preferred addresses taken. Fall back to any available address,
+  // starting from 0xE (reserved/rarely used) down through standard addresses.
+  // Skip 0xF (broadcast) and any we already tried above.
+  ESP_LOGI(TAG, "Preferred addresses taken, trying fallback addresses");
+  for (int8_t candidate = CEC_ADDR_FREE_USE; candidate >= 0; candidate--) {
+    if (test_address_available_(candidate)) {
+      address_ = candidate;
+      ESP_LOGI(TAG, "Claimed fallback logical address 0x%X", address_);
+      return;
+    }
+  }
+
+  ESP_LOGW(TAG, "All addresses taken, using Unregistered (0xF)");
+}
+
+void HDMICEC::broadcast_physical_address_() {
+  auto physical_address_bytes = decode_value(physical_address_);
+  std::vector<uint8_t> data = {CEC_OPCODE_REPORT_PHYSICAL_ADDRESS};
+  data.insert(data.end(), physical_address_bytes.begin(), physical_address_bytes.end());
+  data.push_back(logical_address_to_device_type(address_));
+  send(address_, CEC_ADDR_BROADCAST, data);
+}
+
+// --- Bus scanning ---
+
+void HDMICEC::start_scan() {
+  if (monitor_mode_) {
+    ESP_LOGW(TAG, "Cannot scan in monitor mode");
+    return;
+  }
+  cancel_timeout("scan_complete");
+  scanning_ = true;
+  last_scan_start_ms_ = millis();
+  for (uint8_t i = 0; i <= CEC_ADDR_MAX_ASSIGNABLE; i++) {
+    scan_pending_[i] = (i != address_);
+  }
+  ESP_LOGI(TAG, "Starting CEC bus scan");
+  set_timeout("scan_complete", 10000, [this]() { complete_scan_(); });
+}
+
+void HDMICEC::complete_scan_() {
+  scanning_ = false;
+  uint8_t count = 0;
+  ESP_LOGI(TAG, "=== CEC Bus Scan Results ===");
+  for (uint8_t i = 0; i <= CEC_ADDR_MAX_ASSIGNABLE; i++) {
+    if (devices_[i].last_seen_ms < last_scan_start_ms_)
+      continue;
+    count++;
+    auto &dev = devices_[i];
+    auto vendor_str = CECDevice::vendor_id_to_string(dev.vendor_id);
+    auto vendor_name = CECDevice::vendor_name_to_string(dev.vendor_id);
+    if (vendor_name != "Unknown")
+      vendor_str += " (" + vendor_name + ")";
+    ESP_LOGI(TAG, "  0x%X: %s, %s, vendor %s, CEC %s, %s%s%s", i,
+             CECDevice::device_type_to_string(dev.device_type).c_str(),
+             CECDevice::physical_address_to_string(dev.physical_address).c_str(), vendor_str.c_str(),
+             CECDevice::cec_version_to_string(dev.cec_version).c_str(),
+             CECDevice::power_status_to_string(dev.power_status).c_str(), dev.osd_name.empty() ? "" : ", OSD \"",
+             dev.osd_name.empty() ? "" : (dev.osd_name + "\"").c_str());
+  }
+  ESP_LOGI(TAG, "=== %d device(s) found ===", count);
+  for (uint8_t i = 0; i <= CEC_ADDR_MAX_ASSIGNABLE; i++) {
+    notify_remote_devices_(i);
+  }
+  for (auto *trigger : scan_complete_triggers_) {
+    trigger->trigger();
+  }
+}
+
+void HDMICEC::set_power_poll_interval(uint32_t ms) {
+  power_poll_interval_ms_ = ms;
+  cancel_interval("poll_power");
+  if (ms == 0)
+    return;
+  set_interval("poll_power", ms, [this]() {
+    if (remote_devices_.empty())
+      return;
+    for (size_t i = 0; i < remote_devices_.size(); i++) {
+      poll_power_index_ = (poll_power_index_ + 1) % remote_devices_.size();
+      auto *dev = remote_devices_[poll_power_index_];
+      auto addr = dev->get_address();
+      if (addr.has_value() && dev->needs_power_poll()) {
+        send(address_, *addr, {CEC_OPCODE_GIVE_DEVICE_POWER_STATUS});
+        break;
+      }
+    }
+  });
+}
+
+void HDMICEC::update_devices_(uint8_t src, uint8_t dest, const std::vector<uint8_t> &data) {
+  if (data.empty() || src > CEC_ADDR_MAX_ASSIGNABLE)
+    return;
+
+  auto &dev = devices_[src];
+  dev.logical_address = src;
+  dev.last_seen_ms = millis();
+
+  uint8_t opcode = data[0];
+  switch (opcode) {
+    case CEC_OPCODE_REPORT_PHYSICAL_ADDRESS:
+      if (data.size() >= 4) {
+        dev.physical_address = (uint16_t(data[1]) << 8) | data[2];
+        dev.device_type = data[3];
+        ESP_LOGD(TAG, "Device 0x%X: physical_address=%04X device_type=%d", src, dev.physical_address, dev.device_type);
+      }
+      break;
+    case CEC_OPCODE_SET_OSD_NAME:
+      if (data.size() >= 2) {
+        dev.osd_name = std::string(data.begin() + 1, data.end());
+        ESP_LOGD(TAG, "Device 0x%X: osd_name='%s'", src, dev.osd_name.c_str());
+      }
+      break;
+    case CEC_OPCODE_DEVICE_VENDOR_ID:
+      if (data.size() >= 4) {
+        dev.vendor_id = (uint32_t(data[1]) << 16) | (uint32_t(data[2]) << 8) | data[3];
+        ESP_LOGD(TAG, "Device 0x%X: vendor_id=%06X", src, dev.vendor_id);
+      }
+      break;
+    case CEC_OPCODE_REPORT_POWER_STATUS:
+      if (data.size() >= 2) {
+        dev.power_status = data[1];
+        ESP_LOGD(TAG, "Device 0x%X: power_status=%d", src, dev.power_status);
+      }
+      break;
+    case CEC_OPCODE_CEC_VERSION:
+      if (data.size() >= 2) {
+        dev.cec_version = data[1];
+        ESP_LOGD(TAG, "Device 0x%X: cec_version=%d", src, dev.cec_version);
+      }
+      break;
+    case CEC_OPCODE_ACTIVE_SOURCE:
+      if (data.size() >= 3) {
+        for (auto &d : devices_) d.active_source = false;
+        dev.active_source = true;
+        dev.physical_address = (uint16_t(data[1]) << 8) | data[2];
+        ESP_LOGD(TAG, "Device 0x%X: active_source, physical_address=%04X", src, dev.physical_address);
+        if (active_source_sensor_ != nullptr) {
+          char buf[5];
+          sprintf(buf, "0x%X", src);
+          active_source_sensor_->publish_state(buf);
+        }
+      }
+      break;
+    case CEC_OPCODE_FEATURE_ABORT:
+      break;
+    default:
+      return;
+  }
+
+  notify_remote_devices_(src);
+
+  // During a scan, chain the next query based on the response we just got.
+  // Feature Abort contains the rejected request opcode in data[1], so we can
+  // match it against SCAN_QUERIES[i].request to skip to the next query.
+  if (scanning_) {
+    for (size_t i = 0; i + 1 < SCAN_QUERY_COUNT; i++) {
+      bool is_response = (opcode == SCAN_QUERIES[i].response);
+      bool is_abort = (opcode == CEC_OPCODE_FEATURE_ABORT && data.size() >= 2 && data[1] == SCAN_QUERIES[i].request);
+      if (is_response || is_abort) {
+        send(address_, src, {SCAN_QUERIES[i + 1].request});
+        break;
+      }
+    }
+  }
+}
+
+const CECDevice &HDMICEC::get_device(uint8_t logical_address) const {
+  static const CECDevice EMPTY{};
+  if (logical_address > CEC_ADDR_MAX_ASSIGNABLE)
+    return EMPTY;
+  return devices_[logical_address];
+}
+
+bool HDMICEC::seen_on_last_scan(uint8_t logical_address) const {
+  if (logical_address > CEC_ADDR_MAX_ASSIGNABLE || last_scan_start_ms_ == 0)
+    return false;
+  return devices_[logical_address].last_seen_ms >= last_scan_start_ms_;
+}
+
+optional<uint8_t> HDMICEC::find_address_by_osd_name(const std::string &name) const {
+  optional<uint8_t> best;
+  uint32_t best_seen = 0;
+  for (uint8_t i = 0; i <= CEC_ADDR_MAX_ASSIGNABLE; i++) {
+    if (devices_[i].last_seen_ms > 0 && devices_[i].osd_name == name && devices_[i].last_seen_ms >= best_seen) {
+      best = i;
+      best_seen = devices_[i].last_seen_ms;
+    }
+  }
+  return best;
+}
+
+optional<uint8_t> HDMICEC::find_address_by_physical_address(uint16_t addr) const {
+  optional<uint8_t> best;
+  uint32_t best_seen = 0;
+  for (uint8_t i = 0; i <= CEC_ADDR_MAX_ASSIGNABLE; i++) {
+    if (devices_[i].last_seen_ms > 0 && devices_[i].physical_address == addr && devices_[i].last_seen_ms >= best_seen) {
+      best = i;
+      best_seen = devices_[i].last_seen_ms;
+    }
+  }
+  return best;
+}
+
+optional<uint8_t> HDMICEC::find_address_by_vendor_and_type(uint32_t vendor_id, uint8_t device_type) const {
+  optional<uint8_t> best;
+  uint32_t best_seen = 0;
+  for (uint8_t i = 0; i <= CEC_ADDR_MAX_ASSIGNABLE; i++) {
+    if (devices_[i].last_seen_ms > 0 && devices_[i].vendor_id == vendor_id && devices_[i].device_type == device_type &&
+        devices_[i].last_seen_ms >= best_seen) {
+      best = i;
+      best_seen = devices_[i].last_seen_ms;
+    }
+  }
+  return best;
+}
+
+bool HDMICEC::send_to_osd_name(uint8_t source, const std::string &name, const std::vector<uint8_t> &data) {
+  auto addr = find_address_by_osd_name(name);
+  if (addr.has_value()) {
+    return send(source, *addr, data);
+  }
+  ESP_LOGW(TAG, "send_to_osd_name: no device found with name '%s'", name.c_str());
+  return false;
+}
+
+bool HDMICEC::send_to_physical_address(uint8_t source, uint16_t phys_addr, const std::vector<uint8_t> &data) {
+  auto addr = find_address_by_physical_address(phys_addr);
+  if (addr.has_value()) {
+    return send(source, *addr, data);
+  }
+  ESP_LOGW(TAG, "send_to_physical_address: no device found with address 0x%04X", phys_addr);
+  return false;
+}
+
+bool HDMICEC::send_to_vendor_and_type(uint8_t source, uint32_t vendor_id, uint8_t device_type,
+                                      const std::vector<uint8_t> &data) {
+  auto addr = find_address_by_vendor_and_type(vendor_id, device_type);
+  if (addr.has_value()) {
+    return send(source, *addr, data);
+  }
+  ESP_LOGW(TAG, "send_to_vendor_and_type: no device found with vendor 0x%06X type %d", vendor_id, device_type);
+  return false;
 }
 
 void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data) {
@@ -172,58 +549,49 @@ void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const st
 
   uint8_t opcode = data[0];
   switch (opcode) {
-    // "Get CEC Version" request
-    case 0x9F: {
-      // reply with "CEC Version" (0x9E)
-      send(address_, source, {0x9E, 0x04});
+    case CEC_OPCODE_GET_CEC_VERSION: {
+      send(address_, source, {CEC_OPCODE_CEC_VERSION, CEC_VERSION_1_3A});
       break;
     }
 
-    // "Give Device Power Status" request
-    case 0x8F: {
-      // reply with "Report Power Status" (0x90)
-      send(address_, source, {0x90, 0x00}); // "On"
+    case CEC_OPCODE_GIVE_DEVICE_POWER_STATUS: {
+      send(address_, source, {CEC_OPCODE_REPORT_POWER_STATUS, CEC_POWER_STATUS_ON});
       break;
     }
 
-    // "Give OSD Name" request
-    case 0x46: {
-      // reply with "Set OSD Name" (0x47)
-      std::vector<uint8_t> data = { 0x47 };
+    case CEC_OPCODE_GIVE_OSD_NAME: {
+      std::vector<uint8_t> data = {CEC_OPCODE_SET_OSD_NAME};
       data.insert(data.end(), osd_name_bytes_.begin(), osd_name_bytes_.end());
       send(address_, source, data);
       break;
     }
 
-    // "Give Physical Address" request
-    case 0x83: {
-      // reply with "Report Physical Address" (0x84)
+    case CEC_OPCODE_GIVE_PHYSICAL_ADDRESS: {
       auto physical_address_bytes = decode_value(physical_address_);
-      std::vector<uint8_t> data = { 0x84 };
+      std::vector<uint8_t> data = {CEC_OPCODE_REPORT_PHYSICAL_ADDRESS};
       data.insert(data.end(), physical_address_bytes.begin(), physical_address_bytes.end());
-      // Device Type
       data.push_back(logical_address_to_device_type(address_));
-      // Broadcast Physical Address
-      send(address_, 0xF, data);
+      send(address_, CEC_ADDR_BROADCAST, data);
       break;
     }
 
-    // Ignore "Feature Abort" opcode responses
-    case 0x00:
-      // no-op
+    case CEC_OPCODE_FEATURE_ABORT:
+    case CEC_OPCODE_ACTIVE_SOURCE:
       break;
 
-    // default case (no built-in handler + no on_message handler) => message not supported => send "Feature Abort"
     default:
-      send(address_, source, {0x00, opcode, 0x00});
+      if (is_scan_response_opcode(opcode))
+        break;
+      send(address_, source, {CEC_OPCODE_FEATURE_ABORT, opcode, CEC_ABORT_UNRECOGNIZED_OPCODE});
       break;
   }
 }
 
 bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes) {
-  if (monitor_mode_) return false;
+  if (monitor_mode_)
+    return false;
 
-  bool is_broadcast = (destination == 0xF);
+  bool is_broadcast = (destination == CEC_ADDR_BROADCAST);
 
   // prepare the bytes to send
   Frame frame(source, destination, data_bytes);
@@ -239,10 +607,12 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
     for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
       int32_t delay = 0;
-      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros()) > 0) {
+      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros()) >
+             0) {
         ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
         delay_microseconds_safe(delay);
-        // Note: during this delay, the 'last_falling_edge_us_' might be incremented by 'gpio_intr_', requiring further wait
+        // Note: during this delay, the 'last_falling_edge_us_' might be incremented by 'gpio_intr_', requiring further
+        // wait
         free_bit_periods = 5;
       }
       ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
@@ -410,14 +780,14 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
   }
 
   bool value = (pulse_duration >= HIGH_BIT_MIN_US && pulse_duration <= HIGH_BIT_MAX_US);
-  
+
   switch (self->receiver_state_) {
     case ReceiverState::ReceivingByte: {
       // write bit to the current byte
       self->recv_byte_buffer_ = (self->recv_byte_buffer_ << 1) | (value & 0b1);
 
       self->recv_bit_counter_++;
-      if (self->recv_bit_counter_ >= 8) { 
+      if (self->recv_bit_counter_ >= 8) {
         // if we reached eight bits, push the current byte to the frame buffer
         if (self->frame_receive_) {
           self->frame_receive_->push_back(self->recv_byte_buffer_);
@@ -435,8 +805,8 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
 
     case ReceiverState::WaitingForEOM: {
       // check if we need to acknowledge this byte on the next bit
-      uint8_t destination_address = self->frame_receive_ ? (self->frame_receive_->front() & 0x0F) : 0xF;
-      if (destination_address != 0xF && destination_address == self->address_) {
+      uint8_t destination_address = self->frame_receive_ ? (self->frame_receive_->front() & 0x0F) : CEC_ADDR_BROADCAST;
+      if (destination_address != CEC_ADDR_BROADCAST && destination_address == self->address_) {
         self->recv_ack_queued_ = true;
       }
 
@@ -450,11 +820,7 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
         reset_state_variables_(self);
       }
 
-      self->receiver_state_ = (
-        isEOM
-        ? ReceiverState::WaitingForEOMAck
-        : ReceiverState::WaitingForAck
-      );
+      self->receiver_state_ = (isEOM ? ReceiverState::WaitingForEOMAck : ReceiverState::WaitingForAck);
       break;
     }
 
@@ -479,5 +845,195 @@ void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_byte_buffer_ = 0x0;
 }
 
+// --- CECDevice static methods ---
+
+std::string CECDevice::device_type_to_string(uint8_t type) {
+#ifdef USE_CEC_DECODER
+  const char *name = Decoder::find_device_type_name(type);
+  if (name != nullptr)
+    return name;
+#endif
+  return "Unknown";
 }
+
+std::string CECDevice::physical_address_to_string(uint16_t addr) {
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%d.%d.%d.%d", (addr >> 12) & 0xF, (addr >> 8) & 0xF, (addr >> 4) & 0xF, addr & 0xF);
+  return buf;
 }
+
+std::string CECDevice::vendor_id_to_string(uint32_t id) {
+  char buf[9];
+  snprintf(buf, sizeof(buf), "0x%06X", id);
+  return buf;
+}
+
+std::string CECDevice::vendor_name_to_string(uint32_t id) {
+#ifdef USE_CEC_DECODER
+  const char *name = Decoder::find_vendor_name(id);
+  if (name != nullptr)
+    return name;
+#endif
+  return "Unknown";
+}
+
+std::string CECDevice::cec_version_to_string(uint8_t version) {
+#ifdef USE_CEC_DECODER
+  const char *name = Decoder::find_cec_version_name(version);
+  if (name != nullptr)
+    return name;
+#endif
+  return "Unknown";
+}
+
+std::string CECDevice::power_status_to_string(uint8_t status) {
+#ifdef USE_CEC_DECODER
+  const char *name = Decoder::find_power_status_name(status);
+  if (name != nullptr)
+    return name;
+#endif
+  return "Unknown";
+}
+
+// --- HDMICEC device methods ---
+
+void HDMICEC::send_button_press(uint8_t destination, uint8_t ui_command) {
+  send(address_, destination, {CEC_OPCODE_USER_CONTROL_PRESSED, ui_command});
+  send(address_, destination, {CEC_OPCODE_USER_CONTROL_RELEASED});
+}
+
+void HDMICEC::notify_remote_devices_(uint8_t logical_address) {
+  if (logical_address > CEC_ADDR_MAX_ASSIGNABLE)
+    return;
+  auto &dev = devices_[logical_address];
+  for (auto *remote : remote_devices_) {
+    if (remote->matches(dev)) {
+      remote->on_device_update(dev);
+    }
+  }
+}
+
+// --- CECRemoteDevice ---
+
+bool CECRemoteDevice::matches(const CECDevice &dev) const {
+  if (dev.last_seen_ms == 0)
+    return false;
+  if (match_osd_name_.has_value() && dev.osd_name != *match_osd_name_)
+    return false;
+  if (match_physical_address_.has_value() && dev.physical_address != *match_physical_address_)
+    return false;
+  if (match_vendor_id_.has_value() && dev.vendor_id != *match_vendor_id_)
+    return false;
+  if (match_device_type_.has_value() && dev.device_type != *match_device_type_)
+    return false;
+  return true;
+}
+
+void CECRemoteDevice::on_device_update(const CECDevice &dev) {
+  resolved_address_ = dev.logical_address;
+  if (osd_name_sensor_ != nullptr)
+    osd_name_sensor_->publish_state(dev.osd_name);
+  if (device_type_sensor_ != nullptr)
+    device_type_sensor_->publish_state(CECDevice::device_type_to_string(dev.device_type));
+  if (vendor_id_sensor_ != nullptr)
+    vendor_id_sensor_->publish_state(CECDevice::vendor_id_to_string(dev.vendor_id));
+  if (vendor_name_sensor_ != nullptr)
+    vendor_name_sensor_->publish_state(CECDevice::vendor_name_to_string(dev.vendor_id));
+  if (physical_address_sensor_ != nullptr)
+    physical_address_sensor_->publish_state(CECDevice::physical_address_to_string(dev.physical_address));
+  if (power_status_sensor_ != nullptr)
+    power_status_sensor_->publish_state(CECDevice::power_status_to_string(dev.power_status));
+  if (cec_version_sensor_ != nullptr)
+    cec_version_sensor_->publish_state(CECDevice::cec_version_to_string(dev.cec_version));
+  if (active_source_sensor_ != nullptr)
+    active_source_sensor_->publish_state(dev.active_source);
+  if (last_seen_sensor_ != nullptr) {
+    uint32_t seconds_ago = (millis() - dev.last_seen_ms) / 1000;
+    if (seconds_ago < 60) {
+      last_seen_sensor_->publish_state("just now");
+    } else if (seconds_ago < 3600) {
+      char buf[16];
+      snprintf(buf, sizeof(buf), "%um ago", (unsigned) (seconds_ago / 60));
+      last_seen_sensor_->publish_state(buf);
+    } else {
+      char buf[16];
+      snprintf(buf, sizeof(buf), "%uh ago", (unsigned) (seconds_ago / 3600));
+      last_seen_sensor_->publish_state(buf);
+    }
+  }
+  if (power_switch_ != nullptr && dev.power_status != 0xFF) {
+    bool is_on = (dev.power_status == CEC_POWER_STATUS_ON || dev.power_status == CEC_POWER_STATUS_IN_TRANSITION_TO_ON);
+    power_switch_->publish_state(is_on);
+  }
+}
+
+// --- CECControlButton ---
+
+void CECControlButton::press_action() {
+  auto addr = device_->get_address();
+  if (addr.has_value()) {
+    parent_->send_button_press(*addr, ui_command_);
+  } else {
+    ESP_LOGW("hdmi_cec", "Control button: device '%s' not found on bus", device_->get_name());
+  }
+}
+
+// --- CECPowerSwitch ---
+
+void CECPowerSwitch::write_state(bool state) {
+  auto addr = device_->get_address();
+  if (addr.has_value()) {
+    parent_->send_button_press(*addr, state ? CEC_UI_COMMAND_POWER_ON : CEC_UI_COMMAND_POWER_OFF);
+  } else {
+    ESP_LOGW("hdmi_cec", "Power switch: device '%s' not found on bus", device_->get_name());
+  }
+}
+
+void CECPowerPollNumber::setup() {
+  float value;
+  pref_ = global_preferences->make_preference<float>(get_object_id_hash());
+  if (pref_.load(&value)) {
+    control(value);
+  }
+}
+
+#ifdef USE_API_CUSTOM_SERVICES
+static std::vector<uint8_t> ints_to_bytes(const std::vector<int32_t> &data) {
+  return std::vector<uint8_t>(data.begin(), data.end());
+}
+
+void HDMICEC::on_send_(int32_t destination, std::vector<int32_t> data) {
+  send(address_, static_cast<uint8_t>(destination), ints_to_bytes(data));
+}
+
+void HDMICEC::on_send_to_osd_name_(std::string osd_name, std::vector<int32_t> data) {
+  send_to_osd_name(address_, osd_name, ints_to_bytes(data));
+}
+
+void HDMICEC::on_send_to_physical_address_(int32_t physical_address, std::vector<int32_t> data) {
+  send_to_physical_address(address_, static_cast<uint16_t>(physical_address), ints_to_bytes(data));
+}
+
+void HDMICEC::on_send_to_vendor_and_type_(int32_t vendor_id, int32_t device_type, std::vector<int32_t> data) {
+  send_to_vendor_and_type(address_, static_cast<uint32_t>(vendor_id), static_cast<uint8_t>(device_type),
+                          ints_to_bytes(data));
+}
+
+void HDMICEC::on_scan_bus_() { start_scan(); }
+
+void CECRemoteDevice::register_api_service_() {
+  register_service(&CECRemoteDevice::on_api_send_, std::string("send_to_device_") + yaml_id_, {"data"});
+}
+
+void CECRemoteDevice::on_api_send_(std::vector<int32_t> data) {
+  auto addr = get_address();
+  if (addr.has_value()) {
+    parent_->send(parent_->address(), *addr, ints_to_bytes(data));
+  } else {
+    ESP_LOGW(TAG, "send_to_device: device '%s' not found on bus", name_);
+  }
+}
+#endif
+
+}  // namespace hdmi_cec
+}  // namespace esphome
