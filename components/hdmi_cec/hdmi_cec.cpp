@@ -263,7 +263,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   return false;
 }
 
-SendResult IRAM_ATTR HDMICEC::send_frame_(const Frame &frame, bool is_broadcast) {
+SendResult HDMICEC::send_frame_(const Frame &frame, bool is_broadcast) {
   pin_->detach_interrupt();  // do NOT listen for pin changes while sending
   auto result = SendResult::Success;
 
@@ -310,7 +310,7 @@ SendResult IRAM_ATTR HDMICEC::send_frame_(const Frame &frame, bool is_broadcast)
   return result;
 }
 
-bool IRAM_ATTR HDMICEC::send_start_bit_() {
+bool HDMICEC::send_start_bit_() {
   // 1. pull low for 3700 us
   set_pin_output_low();
   delay_microseconds_safe(3700);
@@ -332,7 +332,7 @@ bool IRAM_ATTR HDMICEC::send_start_bit_() {
   return success;
 }
 
-void IRAM_ATTR HDMICEC::send_bit_(bool bit_value) {
+void HDMICEC::send_bit_(bool bit_value) {
   // total bit duration:
   // logic 1: pull low for 600 us, then pull high for 1800 us
   // logic 0: pull low for 1500 us, then pull high for 900 us
@@ -346,7 +346,7 @@ void IRAM_ATTR HDMICEC::send_bit_(bool bit_value) {
   delay_microseconds_safe(high_duration_us);
 }
 
-bool IRAM_ATTR HDMICEC::send_high_and_test_() {
+bool HDMICEC::send_high_and_test_() {
   uint32_t start_us = micros();
 
   // send a Logical 1
