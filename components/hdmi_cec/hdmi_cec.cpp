@@ -237,14 +237,45 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
     //  - 3 bit periods for resend of a failed transmission attempt
     uint8_t free_bit_periods = (last_sent_us_ > last_falling_edge_us_) ? 7 : 5;
 
+    // Total timeout: abort if we can't send within 2 seconds (prevents infinite blocking on busy bus)
+    static const uint32_t SEND_TIMEOUT_US = 2000000;
+    const uint32_t send_start_us = micros();
+
     for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
       int32_t delay = 0;
-      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, last_falling_edge_us_) - micros()) > 0) {
+      // Per-attempt timeout for bus-free wait: 200ms max per attempt
+      const uint32_t attempt_start_us = micros();
+      static const uint32_t ATTEMPT_TIMEOUT_US = 200000;
+
+      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, (uint32_t) last_falling_edge_us_) - micros()) > 0) {
+        // Check total timeout
+        if ((micros() - send_start_us) > SEND_TIMEOUT_US) {
+          ESP_LOGW(TAG, "HDMICEC::send(): total timeout reached (2s), aborting");
+          return false;
+        }
+        // Check per-attempt timeout (bus constantly busy)
+        if ((micros() - attempt_start_us) > ATTEMPT_TIMEOUT_US) {
+          ESP_LOGW(TAG, "HDMICEC::send(): attempt %d bus-wait timeout (200ms), retrying", i + 1);
+          break;
+        }
         ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
-        delay_microseconds_safe(delay);
+        if (delay >= 1000) {
+          delay_microseconds_safe(1000);
+          yield();
+        } else {
+          delay_microseconds_safe(delay);
+        }
         // Note: during this delay, the 'last_falling_edge_us_' might be incremented by 'gpio_intr_', requiring further wait
         free_bit_periods = 5;
       }
+
+      // Skip frame send if we broke out due to per-attempt timeout
+      if ((micros() - attempt_start_us) > ATTEMPT_TIMEOUT_US) {
+        free_bit_periods = 3;
+        yield();
+        continue;
+      }
+
       ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
 
       auto result = send_frame_(frame, is_broadcast);
@@ -256,10 +287,11 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
                ((result == SendResult::BusCollision) ? "Bus Collision" : "No Ack received"));
       // attempt retransmission with smaller free time gap
       free_bit_periods = 3;
+      yield();
     }
   }
 
-  ESP_LOGE(TAG, "HDMICEC::send(): send failed after five attempts");
+  ESP_LOGE(TAG, "HDMICEC::send(): send failed after %d attempts", MAX_ATTEMPTS);
   return false;
 }
 
