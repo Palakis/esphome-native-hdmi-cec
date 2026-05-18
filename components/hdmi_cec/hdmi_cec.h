@@ -128,7 +128,7 @@ protected:
   std::vector<MessageTrigger*> message_triggers_;
 
   bool last_level_ = true;            // cec line level on last isr call
-  uint32_t last_falling_edge_us_ = 0; // timepoint in received message
+  volatile uint32_t last_falling_edge_us_ = 0; // timepoint in received message (volatile: written by ISR, read by send())
   uint32_t last_sent_us_ = 0;         // timepoint on end of sent message
   ReceiverState receiver_state_;
   uint8_t recv_bit_counter_ = 0;
