@@ -19,6 +19,13 @@ static const uint32_t HIGH_BIT_US = 600;
 static const uint32_t LOW_BIT_US = 1500;
 // arbitration and retransmission
 static const size_t MAX_ATTEMPTS = 5;
+// Yield interval for bus-free wait loop: break long waits into chunks of this
+// duration and call yield() between each, so the FreeRTOS scheduler can run
+// other tasks and the Task Watchdog Timer is not triggered.
+// 1ms is a good trade-off: short enough to maintain CEC timing accuracy
+// (bus-free periods are 7200-16800µs), yet long enough to avoid excessive
+// context-switch overhead from yielding on every microsecond-scale iteration.
+static const uint32_t YIELD_INTERVAL_US = 1000;
 
 static const gpio::Flags INPUT_MODE_FLAGS = gpio::FLAG_INPUT | gpio::FLAG_PULLUP;
 static const gpio::Flags OUTPUT_MODE_FLAGS = gpio::FLAG_OUTPUT | gpio::FLAG_OPEN_DRAIN;
@@ -259,8 +266,8 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
           break;
         }
         ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
-        if (delay >= 1000) {
-          delay_microseconds_safe(1000);
+        if (delay >= (int32_t) YIELD_INTERVAL_US) {
+          delay_microseconds_safe(YIELD_INTERVAL_US);
           yield();
         } else {
           delay_microseconds_safe(delay);
