@@ -133,9 +133,12 @@ class Decoder {
   bool append_operand(const char *word, uint8_t offset_incr = 1);
 
   template<uint32_t N_STRINGS> bool append_operand(const std::array<const char *, N_STRINGS> &strings) {
+    if (offset_ >= frame_.size()) {
+      return append_operand("?");
+    }
     uint32_t operand_value = frame_[offset_];
-    const char *s = (operand_value < N_STRINGS) ? strings[operand_value] : "?";
-    return append_operand(s);
+    const char *s = (operand_value < N_STRINGS) ? strings[operand_value] : nullptr;
+    return append_operand(s ? s : "?");  // null-guard: nullptr entry in array -> "?"
   }
 
   /**
