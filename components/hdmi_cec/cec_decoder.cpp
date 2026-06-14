@@ -155,12 +155,12 @@ template<uint32_t OPERANDS> bool Decoder::do_operand() {
 template<> bool Decoder::do_operand<Decoder::None>() { return append_operand(""); }
 
 template<> bool Decoder::do_operand<Decoder::AbortReason>() {
-  const static std::array<const char *, 7> names = {"Unrecognized opcode",
-                                                    "Not in correct mode to respond",
-                                                    "Cannot provide source",
-                                                    "Invalid operand",
-                                                    "Refused",
-                                                    "Unable to determine"};
+  const static std::array<const char *, 6> names = {"Unrecognized opcode",
+                                                    "Not in correct mode to respond",
+                                                    "Cannot provide source",
+                                                    "Invalid operand",
+                                                    "Refused",
+                                                    "Unable to determine"};
   return append_operand<names.size()>(names);
 }
 
@@ -185,15 +185,15 @@ template<> bool Decoder::do_operand<Decoder::AudioStatus>() {
 }
 
 template<> bool Decoder::do_operand<Decoder::DeviceType>() {
-  const static std::array<const char *, 9> names = {"TV]",           "Recording Device]", "Reserved",
-                                                    "Tuner",       "Playback Device", "Audio System",
+  const static std::array<const char *, 8> names = {"TV",           "Recording Device", "Reserved",
+                                                    "Tuner",       "Playback Device", "Audio System",
                                                     "Pure CEC Switch", "Video Processor"};
   return append_operand<names.size()>(names);
 }
 
 template<> bool Decoder::do_operand<Decoder::DisplayControl>() {
-  const static std::array<const char *, 9> names = {"Default Time", "Until cleared", "Clear previous",
-                                                    "Reserved"};
+  const static std::array<const char *, 4> names = {"Default Time", "Until cleared", "Clear previous",
+                                                    "Reserved"};
   return append_operand<names.size()>(names);
 }
 
@@ -229,7 +229,7 @@ template<> bool Decoder::do_operand<Decoder::PhysicalAddress>() {
 }
 
 template<> bool Decoder::do_operand<Decoder::PowerStatus>() {
-  const static std::array<const char *, 5> names = {"On", "Standby", "Standby->On", "On->Standby"};
+  const static std::array<const char *, 4> names = {"On", "Standby", "Standby->On", "On->Standby"};
   return append_operand<names.size()>(names);
 }
 
@@ -268,7 +268,7 @@ template<> bool Decoder::do_operand<Decoder::ShortAudioDescriptor>() {
 }
 
 template<> bool Decoder::do_operand<Decoder::SystemAudioStatus>() {
-  const static std::array<const char *, 3> names = {"Off", "On"};
+  const static std::array<const char *, 2> names = {"Off", "On"};
   return append_operand<names.size()>(names);
 }
 
@@ -425,7 +425,14 @@ const char *Decoder::find_opcode_name(uint32_t opcode) const {
    * @return true if a further operand can be decoded, false otherwise
    */
   bool Decoder::append_operand(const char *word, uint8_t offset_incr /* default 1 */) {
-    length_ += snprintf(&line_[length_], (line_.size() - length_), "[%s]", word);
+    if (length_ < line_.size()) {
+      int written = snprintf(&line_[length_], (line_.size() - length_), "[%s]", word);
+      if (written > 0) {
+        length_ += (unsigned int) written;
+        if (length_ > line_.size())
+          length_ = line_.size();  // clamp: snprintf returns desired length, not actual written
+      }
+    }
     offset_ += offset_incr;
     return (length_ < line_.size()) && (offset_ < frame_.size());
   }
