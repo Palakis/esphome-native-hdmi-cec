@@ -1,6 +1,8 @@
 #include "hdmi_cec.h"
 #include "esphome/core/log.h"
 
+#include <algorithm>
+
 #ifdef USE_CEC_DECODER
 #include "cec_decoder.h"
 #endif
@@ -75,8 +77,104 @@ void HDMICEC::setup() {
   this->pin_->setup();  
   isr_pin_ = pin_->to_isr();
   frames_queue_.reset();
+  tx_results_.reserve(MAX_FRAMES_TO_SEND);
+
+#ifdef USE_ESP32
+  tx_queue_ = xQueueCreate(MAX_FRAMES_TO_SEND, sizeof(TxRecord));
+  if (tx_queue_ == nullptr) {
+    ESP_LOGE(TAG, "could not create the transmit queue");
+    this->mark_failed();
+    return;
+  }
+  BaseType_t created = (tx_core_ < 0)
+      ? xTaskCreate(HDMICEC::tx_task_entry_, "hdmi_cec_tx", TX_TASK_STACK_WORDS, this,
+                    TX_TASK_PRIORITY, &tx_task_)
+      : xTaskCreatePinnedToCore(HDMICEC::tx_task_entry_, "hdmi_cec_tx", TX_TASK_STACK_WORDS, this,
+                                TX_TASK_PRIORITY, &tx_task_, tx_core_);
+  if (created != pdPASS) {
+    ESP_LOGE(TAG, "could not create the transmit task");
+    this->mark_failed();
+    return;
+  }
+#endif
+
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   set_pin_input_high();
+}
+
+#ifdef USE_ESP32
+void HDMICEC::tx_task_entry_(void *param) { static_cast<HDMICEC *>(param)->tx_task_loop_(); }
+
+void HDMICEC::tx_task_loop_() {
+  TxRecord request;
+  while (true) {
+    // The only blocking point. Everything below runs to completion before the next frame is
+    // taken, so the bus has one writer and the retransmission state needs no locking.
+    if (xQueueReceive(tx_queue_, &request, portMAX_DELAY) != pdTRUE || request.length < 1) {
+      continue;
+    }
+    Frame frame;
+    frame.assign(request.bytes, request.bytes + request.length);
+    bool is_broadcast = frame.is_broadcast();
+
+    ESP_LOGD(TAG, "[sending] %s", frame.to_string().c_str());
+    SendResult result = send_with_retries_(frame, is_broadcast);
+    publish_result_(frame, result);
+  }
+}
+#endif
+
+void HDMICEC::publish_result_(const Frame &frame, SendResult result) {
+  TxResultRecord record;
+  record.length = (uint8_t) std::min((size_t) Frame::MAX_LENGTH, frame.size());
+  std::copy(frame.begin(), frame.begin() + record.length, record.bytes);
+  record.result = result;
+
+  LockGuard lock(tx_results_mutex_);
+  if (tx_results_.size() >= (size_t) MAX_FRAMES_TO_SEND) {
+    // The loop task is not draining. Dropping the oldest keeps the newest, which is the one
+    // an automation is most likely still waiting on.
+    tx_results_.erase(tx_results_.begin());
+  }
+  tx_results_.push_back(record);
+}
+
+void HDMICEC::process_send_results_() {
+  std::vector<TxResultRecord> results;
+  {
+    LockGuard lock(tx_results_mutex_);
+    if (tx_results_.empty()) {
+      return;
+    }
+    results.swap(tx_results_);
+  }
+
+  for (const auto &record : results) {
+    if (record.length < 1) {
+      continue;
+    }
+    uint8_t src_addr = ((record.bytes[0] & 0xF0) >> 4);
+    uint8_t dest_addr = (record.bytes[0] & 0x0F);
+    uint8_t opcode = (record.length >= 2) ? record.bytes[1] : 0;
+    std::vector<uint8_t> data(record.bytes + 1, record.bytes + record.length);
+    bool success = (record.result == SendResult::Success);
+
+    if (!success) {
+      ESP_LOGI(TAG, "HDMICEC::send(): frame not sent: %s",
+               ((record.result == SendResult::BusCollision) ? "Bus Collision" : "No Ack received"));
+    }
+
+    for (auto trigger : send_result_triggers_) {
+      bool can_trigger = (
+        (!trigger->source_.has_value()      || (trigger->source_ == src_addr)) &&
+        (!trigger->destination_.has_value() || (trigger->destination_ == dest_addr)) &&
+        (!trigger->opcode_.has_value()      || (trigger->opcode_ == opcode))
+      );
+      if (can_trigger) {
+        trigger->trigger(src_addr, dest_addr, data, success);
+      }
+    }
+  }
 }
 
 void HDMICEC::dump_config() {
@@ -85,9 +183,20 @@ void HDMICEC::dump_config() {
   ESP_LOGCONFIG(TAG, "  address: %x", address_);
   ESP_LOGCONFIG(TAG, "  promiscuous mode: %s", (promiscuous_mode_ ? "yes" : "no"));
   ESP_LOGCONFIG(TAG, "  monitor mode: %s", (monitor_mode_ ? "yes" : "no"));
+#ifdef USE_ESP32
+  if (tx_core_ < 0) {
+    ESP_LOGCONFIG(TAG, "  transmit task core: any");
+  } else {
+    ESP_LOGCONFIG(TAG, "  transmit task core: %d", tx_core_);
+  }
+#endif
 }
 
 void HDMICEC::loop() {
+  // Before the received frames, so an automation that sends from on_message sees the result
+  // of its previous send first.
+  process_send_results_();
+
   while (const Frame *frame = frames_queue_.front()) {
     uint8_t header = frame->front();
     uint8_t src_addr = ((header & 0xF0) >> 4);
@@ -230,19 +339,41 @@ void HDMICEC::try_builtin_handler_(uint8_t source, uint8_t destination, const st
 bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data_bytes) {
   if (monitor_mode_) return false;
 
-  bool is_broadcast = (destination == 0xF);
-
-  // prepare the bytes to send
   Frame frame(source, destination, data_bytes);
-  ESP_LOGD(TAG, "[sending] %s", frame.to_string().c_str());
+  if (frame.size() > (size_t) Frame::MAX_LENGTH) {
+    ESP_LOGW(TAG, "HDMICEC::send(): frame of %u bytes exceeds the CEC maximum", (unsigned) frame.size());
+    return false;
+  }
 
+#ifdef USE_ESP32
+  TxRecord request;
+  request.length = (uint8_t) frame.size();
+  std::copy(frame.begin(), frame.end(), request.bytes);
+  // Never waits: this runs on the loop task, and a full queue means the bus is already
+  // backed up by a second of traffic. Failing here is better than stalling every automation
+  // behind it.
+  if (xQueueSend(tx_queue_, &request, 0) != pdTRUE) {
+    ESP_LOGW(TAG, "HDMICEC::send(): transmit queue full, dropping %s", frame.to_string(true).c_str());
+    return false;
+  }
+  return true;
+#else
+  // No FreeRTOS here, so the caller pays for the frame as before. The result still travels
+  // through the same buffer, so the trigger fires from loop() on every platform.
+  ESP_LOGD(TAG, "[sending] %s", frame.to_string().c_str());
+  publish_result_(frame, send_with_retries_(frame, frame.is_broadcast()));
+  return true;
+#endif
+}
+
+SendResult HDMICEC::send_with_retries_(const Frame &frame, bool is_broadcast) {
+  SendResult last_result = SendResult::NoAck;
   {
-    LockGuard send_lock(send_mutex_);
     // Bus 'Signal Free' time between transmissions, according to the HDMI-CEC standard, shall be a minimum of:
     //  - 7 bit periods between successive transmissions of same sender
     //  - 5 bit periods between transmissions of different senders
     //  - 3 bit periods for resend of a failed transmission attempt
-    uint8_t free_bit_periods = (last_sent_us_ > last_falling_edge_us_) ? 7 : 5;
+    uint8_t free_bit_periods = (last_sent_us_.load() > last_falling_edge_us_) ? 7 : 5;
 
     // Total timeout: abort if we can't send within 2 seconds (prevents infinite blocking on busy bus)
     static const uint32_t SEND_TIMEOUT_US = 2000000;
@@ -254,11 +385,11 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
       const uint32_t attempt_start_us = micros();
       static const uint32_t ATTEMPT_TIMEOUT_US = 200000;
 
-      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, (uint32_t) last_falling_edge_us_) - micros()) > 0) {
+      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_.load(), (uint32_t) last_falling_edge_us_) - micros()) > 0) {
         // Check total timeout
         if ((micros() - send_start_us) > SEND_TIMEOUT_US) {
           ESP_LOGW(TAG, "HDMICEC::send(): total timeout reached (2s), aborting");
-          return false;
+          return SendResult::BusCollision;
         }
         // Check per-attempt timeout (bus constantly busy)
         if ((micros() - attempt_start_us) > ATTEMPT_TIMEOUT_US) {
@@ -267,8 +398,15 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
         }
         ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
         if (delay >= (int32_t) YIELD_INTERVAL_US) {
+#ifdef USE_ESP32
+          // A bus-free period is 12000-16800 us, so the millisecond granularity of a tick
+          // costs nothing here and the core is free for other work meanwhile. Bit timing
+          // below stays on delay_microseconds_safe(); 2400 us is not schedulable.
+          vTaskDelay(pdMS_TO_TICKS(YIELD_INTERVAL_US / 1000));
+#else
           delay_microseconds_safe(YIELD_INTERVAL_US);
           yield();
+#endif
         } else {
           delay_microseconds_safe(delay);
         }
@@ -285,13 +423,13 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
 
       ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
 
-      auto result = send_frame_(frame, is_broadcast);
-      if (result == SendResult::Success) {
+      last_result = send_frame_(frame, is_broadcast);
+      if (last_result == SendResult::Success) {
         ESP_LOGD(TAG, "frame sent and acknowledged");
-        return true;
+        return last_result;
       }
-      ESP_LOGI(TAG, "HDMICEC::send(): frame not sent: %s",
-               ((result == SendResult::BusCollision) ? "Bus Collision" : "No Ack received"));
+      ESP_LOGV(TAG, "HDMICEC::send(): attempt %d failed: %s", i + 1,
+               ((last_result == SendResult::BusCollision) ? "Bus Collision" : "No Ack received"));
       // attempt retransmission with smaller free time gap
       free_bit_periods = 3;
       yield();
@@ -299,7 +437,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
   }
 
   ESP_LOGE(TAG, "HDMICEC::send(): send failed after %d attempts", MAX_ATTEMPTS);
-  return false;
+  return last_result;
 }
 
 SendResult HDMICEC::send_frame_(const Frame &frame, bool is_broadcast) {
@@ -344,7 +482,7 @@ SendResult HDMICEC::send_frame_(const Frame &frame, bool is_broadcast) {
     }
   }
   // capture last bus busy time also for bus writes (with interrupts off)
-  last_sent_us_ = micros();
+  last_sent_us_.store(micros());
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   return result;
 }
