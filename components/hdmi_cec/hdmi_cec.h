@@ -9,7 +9,13 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/helpers.h"
 
-#ifdef USE_ESP32
+// Platforms that provide a FreeRTOS scheduler run the bit-level work in their own tasks and
+// keep the ISR to a timestamp. Platforms that do not keep the in-line paths below.
+#if defined(USE_ESP32)
+#define HDMI_CEC_USE_FREERTOS
+#endif
+
+#ifdef HDMI_CEC_USE_FREERTOS
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -57,6 +63,13 @@ struct TxRecord {
 
 struct TxResultRecord : public TxRecord {
   SendResult result{SendResult::Success};
+};
+
+// One line transition. The ISR records the level and the moment it changed; the decoder
+// runs later, so it has to work from this timestamp and not from the pin.
+struct EdgeEvent {
+  uint32_t us{0};
+  bool level{true};
 };
 
 /*
@@ -140,6 +153,11 @@ public:
 protected:
   static void gpio_intr_(HDMICEC *self);
   static void reset_state_variables_(HDMICEC *self);
+  // Receiver state machine for one line transition. Runs in the receive task where there is
+  // one, and in the ISR where there is not.
+  static void process_edge_(HDMICEC *self, bool level, uint32_t now);
+  // Holds the line low for the remainder of the ack bit that started at edge_us.
+  static void drive_ack_(HDMICEC *self, uint32_t edge_us);
   void try_builtin_handler_(uint8_t source, uint8_t destination, const std::vector<uint8_t> &data);
   // Bus-free wait, arbitration and retransmission. Blocks for as long as the bus makes it;
   // only ever called from the transmit task on ESP32, and from send() elsewhere.
@@ -153,12 +171,23 @@ protected:
   void set_pin_input_high();
   void set_pin_output_low();
 
-#ifdef USE_ESP32
+#ifdef HDMI_CEC_USE_FREERTOS
   static void tx_task_entry_(void *param);
   void tx_task_loop_();
+  static void rx_task_entry_(void *param);
+  void rx_task_loop_();
 
   TaskHandle_t tx_task_{nullptr};
   QueueHandle_t tx_queue_{nullptr};
+  TaskHandle_t rx_task_{nullptr};
+
+  // Single producer (the ISR), single consumer (the receive task), so the two indices need
+  // no lock of their own.
+  constexpr static uint16_t EDGE_QUEUE_SIZE = 128;
+  std::array<EdgeEvent, EDGE_QUEUE_SIZE> edge_queue_{};
+  std::atomic<uint16_t> edge_head_{0};
+  std::atomic<uint16_t> edge_tail_{0};
+  std::atomic<bool> edge_overflow_{false};
 #endif
   // Results are collected here by whoever sent the frame and drained by loop(), so the
   // triggers run on the loop task like every other automation in the component.
@@ -172,6 +201,10 @@ protected:
   // Above the loop task, so a queued frame is not left waiting behind ordinary work, and
   // well below the timer and Wi-Fi tasks.
   constexpr static int TX_TASK_PRIORITY = 10;
+  constexpr static int RX_TASK_STACK_WORDS = 3072;
+  // Above the transmit task: an ack has to go out within the bit that asked for it, and the
+  // transmitter can be busy holding the line for milliseconds at a time.
+  constexpr static int RX_TASK_PRIORITY = 19;
   InternalGPIOPin *pin_;
   ISRInternalGPIOPin isr_pin_;
   uint8_t address_;
@@ -186,6 +219,9 @@ protected:
   // Written by the transmit task, read by it and by the bus-free calculation. Atomic
   // because those are no longer the same task.
   std::atomic<uint32_t> last_sent_us_{0};  // timepoint on end of sent message
+  // The decoder cannot use last_falling_edge_us_: by the time it processes a rising edge the
+  // ISR may already have recorded a later fall.
+  uint32_t rx_last_falling_us_ = 0;
   ReceiverState receiver_state_;
   uint8_t recv_bit_counter_ = 0;
   uint8_t recv_byte_buffer_ = 0;

@@ -11,6 +11,13 @@ namespace esphome {
 namespace hdmi_cec {
 
 static const char *const TAG = "hdmi_cec";
+
+// Where the decoder runs in a task it does not belong in IRAM.
+#ifdef HDMI_CEC_USE_FREERTOS
+#define HDMI_CEC_RX_ATTR
+#else
+#define HDMI_CEC_RX_ATTR IRAM_ATTR
+#endif
 // receiver constants
 static const uint32_t START_BIT_MIN_US = 3500;
 static const uint32_t HIGH_BIT_MIN_US = 400;
@@ -79,7 +86,7 @@ void HDMICEC::setup() {
   frames_queue_.reset();
   tx_results_.reserve(MAX_FRAMES_TO_SEND);
 
-#ifdef USE_ESP32
+#ifdef HDMI_CEC_USE_FREERTOS
   tx_queue_ = xQueueCreate(MAX_FRAMES_TO_SEND, sizeof(TxRecord));
   if (tx_queue_ == nullptr) {
     ESP_LOGE(TAG, "could not create the transmit queue");
@@ -96,13 +103,49 @@ void HDMICEC::setup() {
     this->mark_failed();
     return;
   }
+
+  created = (tx_core_ < 0) ? xTaskCreate(HDMICEC::rx_task_entry_, "hdmi_cec_rx", RX_TASK_STACK_WORDS, this,
+                                         RX_TASK_PRIORITY, &rx_task_)
+                           : xTaskCreatePinnedToCore(HDMICEC::rx_task_entry_, "hdmi_cec_rx", RX_TASK_STACK_WORDS, this,
+                                                     RX_TASK_PRIORITY, &rx_task_, tx_core_);
+  if (created != pdPASS) {
+    ESP_LOGE(TAG, "could not create the receive task");
+    this->mark_failed();
+    return;
+  }
 #endif
 
   pin_->attach_interrupt(HDMICEC::gpio_intr_, this, gpio::INTERRUPT_ANY_EDGE);
   set_pin_input_high();
 }
 
-#ifdef USE_ESP32
+#ifdef HDMI_CEC_USE_FREERTOS
+void HDMICEC::rx_task_entry_(void *param) { static_cast<HDMICEC *>(param)->rx_task_loop_(); }
+
+void HDMICEC::rx_task_loop_() {
+  while (true) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    if (edge_overflow_.exchange(false)) {
+      ESP_LOGW(TAG, "edge queue overflow, dropping the frame in flight");
+      receiver_state_ = ReceiverState::Idle;
+      recv_ack_queued_ = false;
+      frame_receive_ = nullptr;
+      reset_state_variables_(this);
+    }
+
+    while (true) {
+      const uint16_t tail = edge_tail_.load(std::memory_order_relaxed);
+      if (tail == edge_head_.load(std::memory_order_acquire)) {
+        break;
+      }
+      const EdgeEvent event = edge_queue_[tail];
+      edge_tail_.store((uint16_t) ((tail + 1) % EDGE_QUEUE_SIZE), std::memory_order_release);
+      process_edge_(this, event.level, event.us);
+    }
+  }
+}
+
 void HDMICEC::tx_task_entry_(void *param) { static_cast<HDMICEC *>(param)->tx_task_loop_(); }
 
 void HDMICEC::tx_task_loop_() {
@@ -183,7 +226,7 @@ void HDMICEC::dump_config() {
   ESP_LOGCONFIG(TAG, "  address: %x", address_);
   ESP_LOGCONFIG(TAG, "  promiscuous mode: %s", (promiscuous_mode_ ? "yes" : "no"));
   ESP_LOGCONFIG(TAG, "  monitor mode: %s", (monitor_mode_ ? "yes" : "no"));
-#ifdef USE_ESP32
+#ifdef HDMI_CEC_USE_FREERTOS
   if (tx_core_ < 0) {
     ESP_LOGCONFIG(TAG, "  transmit task core: any");
   } else {
@@ -345,7 +388,7 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
     return false;
   }
 
-#ifdef USE_ESP32
+#ifdef HDMI_CEC_USE_FREERTOS
   TxRecord request;
   request.length = (uint8_t) frame.size();
   std::copy(frame.begin(), frame.end(), request.bytes);
@@ -398,7 +441,7 @@ SendResult HDMICEC::send_with_retries_(const Frame &frame, bool is_broadcast) {
         }
         ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
         if (delay >= (int32_t) YIELD_INTERVAL_US) {
-#ifdef USE_ESP32
+#ifdef HDMI_CEC_USE_FREERTOS
           // A bus-free period is 12000-16800 us, so the millisecond granularity of a tick
           // costs nothing here and the core is free for other work meanwhile. Bit timing
           // below stays on delay_microseconds_safe(); 2400 us is not schedulable.
@@ -554,24 +597,61 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
   }
   self->last_level_ = level;
 
-  // on falling edge, store current time as the start of the low pulse
   if (level == false) {
     self->last_falling_edge_us_ = now;
+  }
+
+#ifdef HDMI_CEC_USE_FREERTOS
+  const uint16_t head = self->edge_head_.load(std::memory_order_relaxed);
+  const uint16_t next = (uint16_t) ((head + 1) % EDGE_QUEUE_SIZE);
+  if (next == self->edge_tail_.load(std::memory_order_acquire)) {
+    self->edge_overflow_.store(true, std::memory_order_relaxed);
+    return;
+  }
+  self->edge_queue_[head].us = now;
+  self->edge_queue_[head].level = level;
+  self->edge_head_.store(next, std::memory_order_release);
+
+  BaseType_t higher_woken = pdFALSE;
+  vTaskNotifyGiveFromISR(self->rx_task_, &higher_woken);
+  if (higher_woken == pdTRUE) {
+    portYIELD_FROM_ISR();
+  }
+#else
+  process_edge_(self, level, now);
+#endif
+}
+
+void HDMI_CEC_RX_ATTR HDMICEC::drive_ack_(HDMICEC *self, uint32_t edge_us) {
+#ifdef HDMI_CEC_USE_FREERTOS
+  self->set_pin_output_low();
+  const uint32_t elapsed = micros() - edge_us;
+  if (elapsed < LOW_BIT_US) {
+    delay_microseconds_safe(LOW_BIT_US - elapsed);
+  }
+  self->set_pin_input_high();
+#else
+  InterruptLock interrupt_lock;
+  self->set_pin_output_low();
+  delay_microseconds_safe(LOW_BIT_US);
+  self->set_pin_input_high();
+#endif
+}
+
+void HDMI_CEC_RX_ATTR HDMICEC::process_edge_(HDMICEC *self, bool level, uint32_t now) {
+  // on falling edge, store current time as the start of the low pulse
+  if (level == false) {
+    self->rx_last_falling_us_ = now;
 
     if (self->recv_ack_queued_ && !self->monitor_mode_) {
       self->recv_ack_queued_ = false;
-      {
-        InterruptLock interrupt_lock;
-        self->set_pin_output_low();
-        delay_microseconds_safe(LOW_BIT_US);
-        self->set_pin_input_high();
-      }
+      drive_ack_(self, now);
     }
     return;
   }
   // otherwise, it's a rising edge, so it's time to process the pulse length
 
-  auto pulse_duration = (now - self->last_falling_edge_us_);
+  auto pulse_duration = (now - self->rx_last_falling_us_);
 
   if (pulse_duration > START_BIT_MIN_US) {
     // start bit detected. reset everything and start receiving
@@ -651,7 +731,7 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
   }
 }
 
-void IRAM_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
+void HDMI_CEC_RX_ATTR HDMICEC::reset_state_variables_(HDMICEC *self) {
   self->recv_bit_counter_ = 0;
   self->recv_byte_buffer_ = 0x0;
 }
