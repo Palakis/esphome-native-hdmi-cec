@@ -9,12 +9,8 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/helpers.h"
 
-// Platforms that provide a FreeRTOS scheduler run the bit-level work in their own tasks and
-// keep the ISR to a timestamp. Platforms that do not keep the in-line paths below.
-#if defined(USE_ESP32)
-#define HDMI_CEC_USE_FREERTOS
-#endif
-
+// Set by the codegen on platforms that provide the FreeRTOS task API. Those run the
+// bit-level work in tasks; the others keep the in-line paths below.
 #ifdef HDMI_CEC_USE_FREERTOS
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>

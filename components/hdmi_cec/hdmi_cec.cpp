@@ -87,6 +87,11 @@ void HDMICEC::setup() {
   tx_results_.reserve(MAX_FRAMES_TO_SEND);
 
 #ifdef HDMI_CEC_USE_FREERTOS
+  if (tx_core_ >= (int8_t) configNUMBER_OF_CORES) {
+    ESP_LOGW(TAG, "core %d does not exist on this chip, running the tasks unpinned", tx_core_);
+    tx_core_ = -1;
+  }
+
   tx_queue_ = xQueueCreate(MAX_FRAMES_TO_SEND, sizeof(TxRecord));
   if (tx_queue_ == nullptr) {
     ESP_LOGE(TAG, "could not create the transmit queue");

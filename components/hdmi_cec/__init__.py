@@ -1,10 +1,8 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome import pins, automation
-from esphome.const import (
-    CONF_ID,
-    CONF_TRIGGER_ID
-)
+from esphome import automation, pins
+from esphome.const import CONF_ID, CONF_TRIGGER_ID
+from esphome.core import CORE
 
 CODEOWNERS = ["@Palakis"]
 
@@ -73,9 +71,7 @@ CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
         cv.Optional(CONF_OSD_NAME, "esphome"): validate_osd_name,
         # Sending occupies a core for the length of the frame. A build that also does
         # real-time work wants that core to be the other one; -1 leaves it to the scheduler.
-        cv.Optional(CONF_TX_CORE, -1): cv.All(
-            cv.only_on_esp32, cv.int_range(min=-1, max=1)
-        ),
+        cv.Optional(CONF_TX_CORE): cv.All(cv.only_on_esp32, cv.int_range(min=-1, max=1)),
         cv.Optional(CONF_ON_SEND_RESULT): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(SendResultTrigger),
@@ -96,9 +92,18 @@ CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
     }
 )
 
+# Platforms whose toolchain provides the FreeRTOS task API the transmit and receive paths
+# are built on.
+def has_freertos():
+    return CORE.is_esp32
+
+
 async def to_code(config):
     if config[CONF_DECODE_MESSAGES] == True:
         cg.add_define('USE_CEC_DECODER')
+
+    if has_freertos():
+        cg.add_define('HDMI_CEC_USE_FREERTOS')
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
