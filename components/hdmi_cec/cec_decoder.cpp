@@ -308,7 +308,7 @@ template<> bool Decoder::do_operand<Decoder::VendorId>() {
   if (it == vendor_ids.end()) {
     // if the hdmi-cec vendor id is not in our list, the id value itself is printed.
     char line[12];
-    sprintf(line, "ID=%06x", id);
+    sprintf(line, "ID=%06lx", id);
     return append_operand(line, 3);
   }
   return append_operand(it->second, 3);

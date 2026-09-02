@@ -1,10 +1,8 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome import pins, automation
-from esphome.const import (
-    CONF_ID,
-    CONF_TRIGGER_ID
-)
+from esphome import automation, pins
+from esphome.const import CONF_ID, CONF_TRIGGER_ID
+from esphome.core import CORE
 
 CODEOWNERS = ["@Palakis"]
 
@@ -16,6 +14,8 @@ CONF_MONITOR_MODE = "monitor_mode"
 CONF_DECODE_MESSAGES = "decode_messages"
 CONF_OSD_NAME = "osd_name"
 CONF_ON_MESSAGE = "on_message"
+CONF_ON_SEND_RESULT = "on_send_result"
+CONF_TX_CORE = "tx_core"
 
 CONF_SOURCE = "source"
 CONF_DESTINATION = "destination"
@@ -51,6 +51,10 @@ HDMICEC = hdmi_cec_ns.class_(
 MessageTrigger = hdmi_cec_ns.class_(
     "MessageTrigger", automation.Trigger.template(cg.uint8, cg.uint8, cg.std_vector.template(cg.uint8))
 )
+SendResultTrigger = hdmi_cec_ns.class_(
+    "SendResultTrigger",
+    automation.Trigger.template(cg.uint8, cg.uint8, cg.std_vector.template(cg.uint8), cg.bool_)
+)
 SendAction = hdmi_cec_ns.class_(
     "SendAction", automation.Action
 )
@@ -65,6 +69,17 @@ CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
         cv.Optional(CONF_MONITOR_MODE, False): cv.boolean,
         cv.Optional(CONF_DECODE_MESSAGES, True): cv.boolean,
         cv.Optional(CONF_OSD_NAME, "esphome"): validate_osd_name,
+        # Sending occupies a core for the length of the frame. A build that also does
+        # real-time work wants that core to be the other one; -1 leaves it to the scheduler.
+        cv.Optional(CONF_TX_CORE): cv.All(cv.only_on_esp32, cv.int_range(min=-1, max=1)),
+        cv.Optional(CONF_ON_SEND_RESULT): automation.validate_automation(
+            {
+                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(SendResultTrigger),
+                cv.Optional(CONF_SOURCE): cv.int_range(min=0, max=15),
+                cv.Optional(CONF_DESTINATION): cv.int_range(min=0, max=15),
+                cv.Optional(CONF_OPCODE): cv.uint8_t,
+            }
+        ),
         cv.Optional(CONF_ON_MESSAGE): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(MessageTrigger),
@@ -77,9 +92,18 @@ CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
     }
 )
 
+# Platforms whose toolchain provides the FreeRTOS task API the transmit and receive paths
+# are built on.
+def has_freertos():
+    return CORE.is_esp32
+
+
 async def to_code(config):
     if config[CONF_DECODE_MESSAGES] == True:
         cg.add_define('USE_CEC_DECODER')
+
+    if has_freertos():
+        cg.add_define('HDMI_CEC_USE_FREERTOS')
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
@@ -91,6 +115,9 @@ async def to_code(config):
     cg.add(var.set_physical_address(config[CONF_PHYSICAL_ADDRESS]))
     cg.add(var.set_promiscuous_mode(config[CONF_PROMISCUOUS_MODE]))
     cg.add(var.set_monitor_mode(config[CONF_MONITOR_MODE]))
+
+    if (tx_core := config.get(CONF_TX_CORE)) is not None:
+        cg.add(var.set_tx_core(tx_core))
 
     osd_name_bytes = bytes(config[CONF_OSD_NAME], 'ascii', 'ignore') # convert string to ascii bytes
     osd_name_bytes = [x for x in osd_name_bytes] # convert byte array to int array
@@ -122,6 +149,32 @@ async def to_code(config):
                 (cg.uint8, "source"),
                 (cg.uint8, "destination"),
                 (cg.std_vector.template(cg.uint8), "data")
+            ],
+            conf
+        )
+
+    for conf in config.get(CONF_ON_SEND_RESULT, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+
+        source = conf.get(CONF_SOURCE)
+        if source is not None:
+            cg.add(trigger.set_source(source))
+
+        destination = conf.get(CONF_DESTINATION)
+        if destination is not None:
+            cg.add(trigger.set_destination(destination))
+
+        opcode = conf.get(CONF_OPCODE)
+        if opcode is not None:
+            cg.add(trigger.set_opcode(opcode))
+
+        await automation.build_automation(
+            trigger,
+            [
+                (cg.uint8, "source"),
+                (cg.uint8, "destination"),
+                (cg.std_vector.template(cg.uint8), "data"),
+                (cg.bool_, "success")
             ],
             conf
         )
