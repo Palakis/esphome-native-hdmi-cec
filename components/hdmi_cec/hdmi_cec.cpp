@@ -394,12 +394,20 @@ bool HDMICEC::send_high_and_test_() {
   set_pin_input_high();
 
   // ...then wait up to the middle of the "Safe sample period" (CEC spec -> Signaling and Bit Timing -> Figure 5)
+  //
+  // Both waits are clamped: the subtraction is unsigned, so once the deadline has already
+  // passed it underflows to nearly 2^32 us. delay_microseconds_safe() routes anything above
+  // 5 ms through vTaskDelay(), so the caller would sleep for ~71 minutes.
   static const uint32_t SAFE_SAMPLE_US = 1050;
-  delay_microseconds_safe(SAFE_SAMPLE_US - (micros() - start_us));
+  uint32_t elapsed_us = micros() - start_us;
+  if (elapsed_us < SAFE_SAMPLE_US)
+    delay_microseconds_safe(SAFE_SAMPLE_US - elapsed_us);
   bool value = pin_->digital_read();
 
   // sleep for the rest of the bit period
-  delay_microseconds_safe(TOTAL_BIT_US - (micros() - start_us));
+  elapsed_us = micros() - start_us;
+  if (elapsed_us < TOTAL_BIT_US)
+    delay_microseconds_safe(TOTAL_BIT_US - elapsed_us);
 
   // If a 'high' value was read, the 'low' pulse was short, not lengthened by another driver.
   // Such short pulse represents a 'high' bit.
