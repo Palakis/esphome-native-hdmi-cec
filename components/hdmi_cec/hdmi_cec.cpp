@@ -249,12 +249,20 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
     const uint32_t send_start_us = micros();
 
     for (size_t i = 0; i < MAX_ATTEMPTS; i++) {
-      int32_t delay = 0;
+      uint32_t delay = 0;
       // Per-attempt timeout for bus-free wait: 200ms max per attempt
       const uint32_t attempt_start_us = micros();
       static const uint32_t ATTEMPT_TIMEOUT_US = 200000;
 
-      while ((delay = free_bit_periods * TOTAL_BIT_US + std::max(last_sent_us_, (uint32_t) last_falling_edge_us_) - micros()) > 0) {
+      // Compare elapsed time rather than a deadline: `micros() - reference` is correct
+      // modulo 2^32, whereas `deadline - micros()` read as int32_t becomes positive again
+      // once more than 2^31 us (~35.8 min) has passed since the last bus edge.
+      while (true) {
+        const uint32_t target_us = free_bit_periods * TOTAL_BIT_US;
+        const uint32_t elapsed_us = micros() - std::max(last_sent_us_, (uint32_t) last_falling_edge_us_);
+        if (elapsed_us >= target_us)
+          break;
+        delay = target_us - elapsed_us;
         // Check total timeout
         if ((micros() - send_start_us) > SEND_TIMEOUT_US) {
           ESP_LOGW(TAG, "HDMICEC::send(): total timeout reached (2s), aborting");
@@ -265,8 +273,8 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
           ESP_LOGW(TAG, "HDMICEC::send(): attempt %d bus-wait timeout (200ms), retrying", i + 1);
           break;
         }
-        ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
-        if (delay >= (int32_t) YIELD_INTERVAL_US) {
+        ESP_LOGV(TAG, "HDMICEC::send(): waiting %u usec for bus free period", delay);
+        if (delay >= YIELD_INTERVAL_US) {
           delay_microseconds_safe(YIELD_INTERVAL_US);
           yield();
         } else {
