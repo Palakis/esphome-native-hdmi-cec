@@ -21,6 +21,7 @@ CONF_SOURCE = "source"
 CONF_DESTINATION = "destination"
 CONF_OPCODE = "opcode"
 CONF_DATA = "data"
+CONF_OBSERVE_ONLY = "observe_only"
 CONF_PARENT = "parent"
 
 def validate_data_array(value):
@@ -71,7 +72,8 @@ CONFIG_SCHEMA = cv.COMPONENT_SCHEMA.extend(
                 cv.Optional(CONF_SOURCE): cv.int_range(min=0, max=15),
                 cv.Optional(CONF_DESTINATION): cv.int_range(min=0, max=15),
                 cv.Optional(CONF_OPCODE): cv.uint8_t,
-                cv.Optional(CONF_DATA): validate_data_array
+                cv.Optional(CONF_DATA): validate_data_array,
+                cv.Optional(CONF_OBSERVE_ONLY, default=False): cv.boolean,
             }
         )
     }
@@ -115,6 +117,9 @@ async def to_code(config):
         data = conf.get(CONF_DATA)
         if data is not None:
             cg.add(trigger.set_data(data))
+
+        if conf[CONF_OBSERVE_ONLY]:
+            cg.add(trigger.set_observe_only(True))
 
         await automation.build_automation(
             trigger,

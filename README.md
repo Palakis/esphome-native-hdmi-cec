@@ -130,6 +130,19 @@ You can filter by:
 
 If no filter is set, you will catch all messages.
 
+By default, a message that matched any `on_message` trigger counts as handled, and the built-in handlers
+(replies to "Give OSD Name", "Give Physical Address", "Give Device Power Status", "Get CEC Version",
+and "Feature Abort" for unsupported opcodes) are skipped. A catch-all trigger, for example one that forwards every
+message to Home Assistant, would therefore silence those replies. Mark such triggers with `observe_only: true`:
+they still run, but do not count as handling the message.
+
+```yaml
+  on_message:
+    - observe_only: true
+      then:
+        - logger.log: "seen"
+```
+
 ---
 
 ### 2. Add Template Buttons to Send CEC Commands
