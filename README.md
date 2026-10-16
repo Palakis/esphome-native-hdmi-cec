@@ -130,6 +130,19 @@ You can filter by:
 
 If no filter is set, you will catch all messages.
 
+By default, a message that matched any `on_message` trigger counts as handled, and the built-in handlers
+(replies to "Give OSD Name", "Give Physical Address", "Give Device Power Status", "Get CEC Version",
+and "Feature Abort" for unsupported opcodes) are skipped. A catch-all trigger, for example one that forwards every
+message to Home Assistant, would therefore silence those replies. Mark such triggers with `observe_only: true`:
+they still run, but do not count as handling the message.
+
+```yaml
+  on_message:
+    - observe_only: true
+      then:
+        - logger.log: "seen"
+```
+
 ---
 
 ### 2. Add Template Buttons to Send CEC Commands
@@ -184,7 +197,8 @@ hdmi_cec:
   ...
   on_message:
     
-    - then:
+    - observe_only: true  # Catch-all: keep the built-in replies working
+      then:
         - homeassistant.event:
             event: esphome.hdmi_cec  # Home Assistant event type (visible in Developer Tools → Events)
             data:
@@ -194,6 +208,18 @@ hdmi_cec:
               raw: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string(true);'  # Full frame in hex (e.g. "40:36")
               translated: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string();'  # Human-readable form (e.g. "TV → Broadcast: Standby")
 ```
+
+> Home Assistant receives all event values as **strings**, with numbers in decimal: `source: "4"`, `destination: "15"`, `opcode: "130"` (0x82).
+> Match them as quoted decimal strings in automation triggers, for example:
+>
+> ```yaml
+> trigger:
+>   - platform: event
+>     event_type: esphome.hdmi_cec
+>     event_data:
+>       source: "4"
+>       opcode: "4"  # Image View On (0x04)
+> ```
 
 ### Text sensors (for dashboards or easier debugging)
 
@@ -207,7 +233,8 @@ hdmi_cec:
   on_message:
       
       # CEC message decoder (human-readable translation)
-    - then:
+    - observe_only: true
+      then:
         - lambda: |-
             std::string translated = hdmi_cec::Frame(source, destination, data).to_string();
             id(cec_translated_message).publish_state(translated);
@@ -247,7 +274,8 @@ hdmi_cec:
   ...
   promiscuous_mode: true
   on_message:
-    - then:
+    - observe_only: true
+      then:
         mqtt.publish:
           topic: cec_messages
           #Payload in CEC-O-Matic format
@@ -339,7 +367,9 @@ hdmi_cec:
   on_message:
 
   # Send CEC messages as Home Assistant events
-  - then:
+  # observe_only: catch-all triggers must not suppress the built-in replies
+  - observe_only: true
+    then:
       - homeassistant.event:
           event: esphome.hdmi_cec # Home Assistant event type (visible in Developer Tools → Events)
           data:
@@ -350,14 +380,16 @@ hdmi_cec:
             translated: !lambda 'return hdmi_cec::Frame(source, destination, data).to_string();'  # Human-readable form (e.g. "TV → Broadcast: Standby")
 
   # Send CEC messages via MQTT in CEC-O-Matic format
-  - then:
+  - observe_only: true
+    then:
       - mqtt.publish:
           topic: cec_messages
           payload: !lambda |-
             return hdmi_cec::Frame(source, destination, data).to_string(true);
 
   # Publish decoded CEC messages as text sensors (raw and translated)
-  - then:
+  - observe_only: true
+    then:
       - lambda: |-
           hdmi_cec::Frame frame = hdmi_cec::Frame(source, destination, data);
           id(cec_raw_message).publish_state(frame.to_string(true));

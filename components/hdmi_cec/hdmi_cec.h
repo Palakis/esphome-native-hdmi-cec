@@ -148,12 +148,14 @@ public:
   void set_destination(uint8_t destination) { destination_ = destination; };
   void set_opcode(uint8_t opcode) { opcode_ = opcode; };
   void set_data(const std::vector<uint8_t> &data) { data_ = data; };
+  void set_observe_only(bool observe_only) { observe_only_ = observe_only; };
 
 protected:
   optional<uint8_t> source_;
   optional<uint8_t> destination_;
   optional<uint8_t> opcode_;
   optional<std::vector<uint8_t>> data_;
+  bool observe_only_{false};
 };
 
 template<typename... Ts> class SendAction : public Action<Ts...> {

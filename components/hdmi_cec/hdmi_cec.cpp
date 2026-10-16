@@ -132,7 +132,10 @@ void HDMICEC::loop() {
       );
       if (can_trigger) {
         trigger->trigger(src_addr, dest_addr, data);
-        handled_by_trigger = true;
+        // observe-only triggers (e.g. logging, events) must not suppress the built-in handlers
+        if (!trigger->observe_only_) {
+          handled_by_trigger = true;
+        }
       }
     }
 
