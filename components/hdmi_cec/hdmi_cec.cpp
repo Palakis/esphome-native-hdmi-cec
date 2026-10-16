@@ -457,9 +457,17 @@ void IRAM_ATTR HDMICEC::gpio_intr_(HDMICEC *self) {
 
       self->recv_bit_counter_++;
       if (self->recv_bit_counter_ >= 8) { 
-        // if we reached eight bits, push the current byte to the frame buffer
+        // if we reached eight bits, push the current byte to the frame buffer.
+        // Never grow past MAX_LENGTH: the buffer is reserve()d to exactly that, so one
+        // more byte reallocates, and that calls the heap from ISR context. Bytes only
+        // stop arriving when an EOM bit is seen, so a receiver desynced by line noise or
+        // bus contention would otherwise append without bound.
         if (self->frame_receive_) {
-          self->frame_receive_->push_back(self->recv_byte_buffer_);
+          if (self->frame_receive_->size() < (size_t) Frame::MAX_LENGTH) {
+            self->frame_receive_->push_back(self->recv_byte_buffer_);
+          } else {
+            self->frame_receive_ = nullptr;
+          }
         }
 
         self->recv_bit_counter_ = 0;
