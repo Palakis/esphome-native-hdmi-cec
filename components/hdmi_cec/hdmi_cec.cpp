@@ -1,4 +1,5 @@
 #include "hdmi_cec.h"
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
 #ifdef USE_CEC_DECODER
@@ -89,6 +90,10 @@ void HDMICEC::dump_config() {
 
 void HDMICEC::loop() {
   while (const Frame *frame = frames_queue_.front()) {
+    // This drains the entire backlog in one call and a frame that triggers a reply
+    // bit-bangs it inline, so a burst can block the loop task for a long time.
+    App.feed_wdt();
+    yield();
     uint8_t header = frame->front();
     uint8_t src_addr = ((header & 0xF0) >> 4);
     uint8_t dest_addr = (header & 0x0F);
@@ -268,6 +273,9 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
         ESP_LOGV(TAG, "HDMICEC::send(): waiting %d usec for bus free period", delay);
         if (delay >= (int32_t) YIELD_INTERVAL_US) {
           delay_microseconds_safe(YIELD_INTERVAL_US);
+          // yield() lets other tasks run but does not reset the task watchdog; only the
+          // subscribed task calling esp_task_wdt_reset() does, which is App.feed_wdt().
+          App.feed_wdt();
           yield();
         } else {
           delay_microseconds_safe(delay);
@@ -286,6 +294,9 @@ bool HDMICEC::send(uint8_t source, uint8_t destination, const std::vector<uint8_
       ESP_LOGV(TAG, "HDMICEC::send(): bus available, sending frame...");
 
       auto result = send_frame_(frame, is_broadcast);
+      // send_frame_() bit-bangs the whole frame with busy-waits and neither yields nor
+      // feeds. Feed here so no un-fed stretch exceeds a single frame.
+      App.feed_wdt();
       if (result == SendResult::Success) {
         ESP_LOGD(TAG, "frame sent and acknowledged");
         return true;
