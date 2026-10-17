@@ -32,7 +32,9 @@ Connect the microcontroller to an HDMI connector (HDMI connectors and breakout b
 | -------- | --------- | --------------------------- |
 | 13 (CEC Data Line)  | => |    Any input/output GPIO (e.g., GPIO26) |
 | 17 (CEC Ground)    | => | Ground                                  |
-| 18  (+5V (optional)) | => | 5V                                   |
+| 18 (+5V, optional; not for powering the board) | => | 5V |
+
+> **Power:** Always power the ESP32/ESP8266 from a separate supply (e.g. USB), regardless of TV model; the optional HDMI pin 18 (+5V) connection is not a power source for the board.
 
 > CEC uses 3.3V logic – safe for ESP32/ESP8266 (or any other microcontroller with 3.3V logic).
 
@@ -163,14 +165,14 @@ button:
 
 ---
 
-### 3. Enable CEC Commands via Home Assistant Services
+### 3. Enable CEC Commands via Home Assistant Actions
 
 Under `api:`:
 
 ```yaml
 api:
-  services:
-    - service: hdmi_cec_send
+  actions:
+    - action: hdmi_cec_send
       variables:
         cec_destination: int
         cec_data: int[]
@@ -287,6 +289,8 @@ hdmi_cec:
 
 ## Advanced Example (All Features Combined)
 
+This example requires ESPHome 2026.9.0 or newer and uses encrypted OTA updates with the API encryption key. When updating an existing device, follow the [OTA encryption migration instructions](https://esphome.io/components/ota/esphome/#enabling-encryption-on-an-existing-device) before replacing `password:` with `encryption:`.
+
 Here’s a full YAML snippet that includes all optional features together (just delete what you don't need):
 
 ```yaml
@@ -307,8 +311,8 @@ api:
   encryption:
     key: "..."
   
-  services:
-    - service: hdmi_cec_send
+  actions:
+    - action: hdmi_cec_send
       variables:
         cec_destination: int
         cec_data: int[]
@@ -319,7 +323,7 @@ api:
 
 ota:
   - platform: esphome
-    password: "..."
+    encryption:  # Reuses the API encryption key
 
 wifi:
   ssid: !secret wifi_ssid
