@@ -42,6 +42,10 @@ The video below demonstrates how to connect an [HDMI breakout board](https://a.a
 
 https://github.com/user-attachments/assets/71e847da-4b04-443f-9d97-f764fa97a007
 
+Example setup: an ESP32 dev board (ESP32-WROOM-32D) wired to an HDMI breakout board with two wires. Yellow goes from HDMI pin 13 (CEC) to GPIO26, black from HDMI pin 17 (CEC ground) to GND. The board is powered from its own USB supply.
+
+<img src="images/example-setup-esp32.jpg" alt="ESP32 dev board wired to an HDMI breakout board: pin 13 to GPIO26, pin 17 to GND" width="450">
+
 ### Step 2: Set up ESPHome
 
 * Start by creating your device using **ESPHome Device Builder** (e.g., via Home Assistant’s ESPHome Add-on or ESPHome Web).
